@@ -25,7 +25,7 @@
 #include <pico/multicore.h>
 #include <hardware/vreg.h>
 #ifdef USE_TINYUSB
-#include <tusb.h>
+#include "Adafruit_TinyUSB_API.h"
 #endif
 #include <reent.h>
 #ifdef RP2350_PSRAM_CS
@@ -260,14 +260,19 @@ extern "C" void __attribute__((__noreturn__)) __wrap___stack_chk_fail() {
 
 
 // Pico_Low_Power needs stdio_flush...
-// Non-blocking in every configuration: SerialUSB::flush() and tud_cdc_write_flush() only kick
-// off a transfer and never wait for a host.  Without USB (NO_USB) or with the Adafruit stack
+// Non-blocking in every configuration: SerialUSB::flush() and TinyUSB_Device_FlushCDC() only
+// kick off a transfer and never wait for a host.  Without USB (NO_USB) or with the Adafruit stack
 // (where "Serial" only exists if the sketch pulls the library in) don't reference Serial at all.
+// With the Adafruit stack go through its weak TinyUSB_Device_* API, like yield() does, instead
+// of calling tud_cdc_*() directly: in host-only mode (USE_TINYUSB_HOST) the library builds no
+// CDC device code, and a direct tud_cdc_write_flush() reference would drag cdc_device.c.o (and
+// the SDK's whole TinyUSB copy) out of libpico.a, giving duplicate symbols at link time.  The
+// library's API also handles every CDC instance and its own locking.
 extern "C" void stdio_flush() {
 #if defined(NO_USB)
     // Nothing to flush
 #elif defined(USE_TINYUSB)
-    tud_cdc_write_flush();
+    TinyUSB_Device_FlushCDC();
 #else
     Serial.flush();
 #endif
