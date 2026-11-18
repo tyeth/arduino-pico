@@ -2,7 +2,7 @@
 // Pico-PIO-USB host on the USB-A port (core1) with a USB SD-card reader (MSC + SdFat), through
 // LowPower light sleep and dormant.  Before every sleep the card is mounted and a file is read; after
 // every wake the reader must still (or again) be mounted and the card readable.
-// Schedule: L = sleepFor(3000); B = dormant until GPIO7 (PIN_BUTTON) is pulled low, reader left in;
+// Schedule: L = sleepFor(3000); B = dormant until D5 (GPIO5, pulled up here) is pulled low, reader left in;
 // R = dormant until the reader is unplugged and re-inserted (rising edge on its pulled-up data line).
 #include "pio_usb.h"
 #include "SdFat_Adafruit_Fork.h"
@@ -14,6 +14,9 @@
 #include <hardware/sync.h>
 
 static const char sched[] = "LLBBRR";
+
+// Header pin the bench (Jumperless) shorts to GND to wake a B cycle.  GPIO7 is only the BOOT button.
+#define WAKE_PIN 5
 
 Adafruit_USBH_Host USBHost;
 Adafruit_USBH_MSC_BlockDevice msc_block_dev;
@@ -136,7 +139,7 @@ static bool readTest(const char *tag, int n) {
 
 void setup() {
     Serial.begin(115200);
-    pinMode(PIN_BUTTON, INPUT_PULLUP);
+    pinMode(WAKE_PIN, INPUT_PULLUP);
     waitHost(60000);
     Serial.printf("HIL380 feather start clk_sys=%lu tusb=%d.%d.%d sched=%s\n", (unsigned long)clock_get_hz(clk_sys), TUSB_VERSION_MAJOR,
                   TUSB_VERSION_MINOR, TUSB_VERSION_REVISION, sched);
@@ -177,7 +180,7 @@ void loop() {
     if (m == 'L') {
         rc = LowPower.sleepFor(3000);
     } else if (m == 'B') {
-        rc = LowPower.dormantUntilPin(PIN_BUTTON, FALLING);
+        rc = LowPower.dormantUntilPin(WAKE_PIN, FALLING);
     } else if (replugPin < 0) {
         rc = -999;
     } else {
