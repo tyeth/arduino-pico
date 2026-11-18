@@ -1,12 +1,17 @@
 # Throwaway test workflow (fork only, branch hil/tinyusb-380-matrix): link matrix for Adafruit TinyUSB
 # 3.8.0 (adafruit/Adafruit_TinyUSB_Arduino master 23e8953) against three arduino-pico cores:
-#   a = stock 6.4.0 (4a79653), b = stdio_flush fix (5cc2a3b), c = stdio_flush fix + LowPower stubs (88efd02)
+#   a = stock 6.4.0 (4a79653), b = stdio_flush fix (5cc2a3b), c = stdio_flush fix + LowPower stubs (88efd02),
+#   d = branch tinyusb-380-core-fixes as pushed (a + b + bundled library bumped to the 3.8.0 tag), its own submodule pointer
 name: TinyUSB 3.8.0 link matrix
 
 on:
   push:
     branches: [hil/tinyusb-380-matrix]
   workflow_dispatch:
+    inputs:
+      cores:
+        description: 'JSON list of core variants to build'
+        default: '["a","b","c","d"]'
 
 jobs:
   build:
@@ -14,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        core: [a, b, c]
+        core: ${{ fromJSON(inputs.cores || '["a","b","c","d"]') }}
         target: [picow, pico2w, feather]
     steps:
     - uses: actions/checkout@v7
@@ -28,11 +33,17 @@ jobs:
       run: |
         cd pico-sdk
         git submodule update --init
-    - name: Adafruit_TinyUSB_Arduino -> 23e8953 (3.8.0)
+    - name: Adafruit_TinyUSB_Arduino -> 23e8953 (3.8.0), or the pointer of tinyusb-380-core-fixes for core d
       run: |
+        SHA=23e8953f403c296127c5a57d798159468a9f1e57
+        if [ "${{ matrix.core }}" = d ]; then
+          git fetch origin tinyusb-380-core-fixes
+          SHA=$(git rev-parse FETCH_HEAD:libraries/Adafruit_TinyUSB_Arduino)
+          echo "core-fix branch $(git rev-parse --short FETCH_HEAD) pins Adafruit_TinyUSB_Arduino $SHA"
+        fi
         cd libraries/Adafruit_TinyUSB_Arduino
-        git fetch origin 23e8953f403c296127c5a57d798159468a9f1e57
-        git checkout --detach 23e8953f403c296127c5a57d798159468a9f1e57
+        git fetch origin $SHA
+        git checkout --detach $SHA
         git log -1 --oneline
         grep version= library.properties
     - name: Core variant ${{ matrix.core }}
@@ -42,6 +53,10 @@ jobs:
           b) git checkout 5cc2a3b -- cores/rp2040/main.cpp
              git checkout 4a79653 -- libraries/LowPower/src/LowPower.cpp ;;
           c) : ;;
+          d) git checkout FETCH_HEAD -- cores libraries/LowPower 2>/dev/null || { git fetch origin tinyusb-380-core-fixes; git checkout FETCH_HEAD -- cores libraries/LowPower; }
+             git fetch origin tinyusb-380-core-fixes
+             echo "diff of cores/ and libraries/LowPower vs the core-fix branch (expect empty):"
+             git diff --stat FETCH_HEAD -- cores libraries/LowPower ;;
         esac
         git status --short cores libraries/LowPower
         git diff --stat HEAD -- cores libraries/LowPower
