@@ -7,6 +7,8 @@
 #include <Adafruit_TinyUSB.h>
 #include <LowPower.h>
 #include <hardware/clocks.h>
+#include <hardware/gpio.h>
+#include <hardware/structs/io_bank0.h>
 
 Adafruit_USBH_Host USBHost;
 
@@ -63,6 +65,14 @@ void loop1() {
     USBHost.task();
 }
 
+static bool rawPad(uint p) {
+    return (io_bank0_hw->io[p].status & IO_BANK0_GPIO0_STATUS_INFROMPAD_BITS) != 0;
+}
+
+static uint32_t inover(uint p) {
+    return (io_bank0_hw->io[p].ctrl & IO_BANK0_GPIO0_CTRL_INOVER_BITS) >> IO_BANK0_GPIO0_CTRL_INOVER_LSB;
+}
+
 static void flushEvents() {
     while (evPrinted < evHead) {
         const Ev &e = evs[evPrinted % 32];
@@ -106,9 +116,12 @@ void loop() {
         return;
     }
     delay(500);
-    bool dp = gpio_get(PIN_USB_HOST_DP), dm = gpio_get(PIN_USB_HOST_DM);
+    // Pico-PIO-USB inverts the pin inputs (INOVER), so gpio_get() is backwards: use the raw pad level
+    bool dp = rawPad(PIN_USB_HOST_DP), dm = rawPad(PIN_USB_HOST_DM);
     int pin = dp ? PIN_USB_HOST_DP : (dm ? PIN_USB_HOST_DM : -1);
-    Serial.printf("CYCLE %d device %04x:%04x addr=%u dp=%d dm=%d wake_pin=%d\n", n, mvid, mpid, mountedAddr, dp, dm, pin);
+    Serial.printf("CYCLE %d device %04x:%04x addr=%u raw dp=%d dm=%d gpio_get dp=%d dm=%d inover dp=%lu dm=%lu wake_pin=%d\n", n, mvid,
+                  mpid, mountedAddr, dp, dm, (int)gpio_get(PIN_USB_HOST_DP), (int)gpio_get(PIN_USB_HOST_DM),
+                  (unsigned long)inover(PIN_USB_HOST_DP), (unsigned long)inover(PIN_USB_HOST_DM), pin);
     if (pin < 0) {
         Serial.println("NO_PULLUP: neither data line is high");
         delay(2000);
@@ -119,7 +132,13 @@ void loop() {
     delay(300);
     uint32_t mountsBefore = mounts;
     LowPower.keepPins((1ULL << PIN_USB_HOST_DP) | (1ULL << PIN_USB_HOST_DM) | (1ULL << PIN_5V_EN));
+    // The dormant wake detector sees the input after INOVER: make it the real pad level while asleep
+    uint32_t ctrlDp = io_bank0_hw->io[PIN_USB_HOST_DP].ctrl, ctrlDm = io_bank0_hw->io[PIN_USB_HOST_DM].ctrl;
+    gpio_set_inover(PIN_USB_HOST_DP, GPIO_OVERRIDE_NORMAL);
+    gpio_set_inover(PIN_USB_HOST_DM, GPIO_OVERRIDE_NORMAL);
     int rc = LowPower.dormantUntilPin(pin, RISING);
+    io_bank0_hw->io[PIN_USB_HOST_DP].ctrl = ctrlDp;
+    io_bank0_hw->io[PIN_USB_HOST_DM].ctrl = ctrlDm;
     uint32_t tWake = millis();
     uint32_t cdcMs = waitHost(30000);
     Serial.printf("WAKE %d rc=%d clk_sys=%lu cdc_back_after=%lums cdc_ok=%d\n", n, rc, (unsigned long)clock_get_hz(clk_sys),
