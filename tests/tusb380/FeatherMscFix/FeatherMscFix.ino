@@ -8,13 +8,11 @@
 // forceReconnect() marks the root port disconnected on core1, exactly as Pico-PIO-USB does when it sees SE0, so the
 // next frame re-detects the device and TinyUSB re-enumerates it.
 #include "pio_usb.h"
-#include "pio_usb_ll.h"
 #include "SdFat_Adafruit_Fork.h"
 #include <Adafruit_TinyUSB.h>
 #include <LowPower.h>
 #include <stdarg.h>
 #include <hardware/clocks.h>
-#include <hardware/sync.h>
 
 static const char sched[] = "LRLR";
 
@@ -64,22 +62,12 @@ extern "C" {
     }
 }
 
-// Runs on core1: mark root port 0 disconnected and fail its queued transfers (what connection_check() does on SE0)
+// pio_reconnect.c (C, since pio_usb_ll.h is not C++-clean): mark the root port disconnected and fail its transfers
+extern "C" void pio_usb_force_reconnect(uint8_t root_idx);
+
+// Runs on core1, which owns the PIO-USB host
 static void doForceReconnect() {
-    uint32_t s = save_and_disable_interrupts();
-    root_port_t *root = PIO_USB_ROOT_PORT(0);
-    if (root->initialized && root->connected) {
-        root->connected = false;
-        root->suspended = true;
-        root->ints |= PIO_USB_INTS_DISCONNECT_BITS;
-        for (int i = 0; i < PIO_USB_EP_POOL_CNT; i++) {
-            endpoint_t *ep = PIO_USB_ENDPOINT(i);
-            if (ep->root_idx == 0 && ep->size && ep->has_transfer) {
-                pio_usb_ll_transfer_complete(ep, PIO_USB_INTS_ENDPOINT_ERROR_BITS);
-            }
-        }
-    }
-    restore_interrupts(s);
+    pio_usb_force_reconnect(0);
     addEv('R', 0);
 }
 
