@@ -19,7 +19,7 @@ static const int CYCLES = 8;
 static unsigned spinClaimed(uint32_t *mask) {
     unsigned n = 0;
     uint32_t m = 0;
-    for (uint i = PICO_SPINLOCK_ID_CLAIM_FREE_FIRST; i <= PICO_SPINLOCK_ID_CLAIM_FREE_END; i++) {
+    for (uint i = PICO_SPINLOCK_ID_CLAIM_FREE_FIRST; i <= PICO_SPINLOCK_ID_CLAIM_FREE_LAST; i++) {
         if (spin_lock_is_claimed(i)) {
             n++;
             m |= 1u << i;
@@ -116,7 +116,7 @@ static void state(const char *tag, int n) {
     uint32_t m;
     unsigned c = spinClaimed(&m);
     Serial1.printf("STATE %s %d spinlocks=%u/%u mask=0x%08lx userirq=0x%02lx tud_inited=%d clk_sys=%lu\n", tag, n, c,
-                   (unsigned)(PICO_SPINLOCK_ID_CLAIM_FREE_END - PICO_SPINLOCK_ID_CLAIM_FREE_FIRST + 1), (unsigned long)m,
+                   (unsigned)(PICO_SPINLOCK_ID_CLAIM_FREE_LAST - PICO_SPINLOCK_ID_CLAIM_FREE_FIRST + 1), (unsigned long)m,
                    (unsigned long)userIrqClaimed(), (int)tud_inited(), (unsigned long)clock_get_hz(clk_sys));
 }
 

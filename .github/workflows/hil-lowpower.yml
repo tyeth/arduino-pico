@@ -66,7 +66,7 @@ jobs:
         build trace-sdk-picow   $PW                   "$S/DeviceDormantTrace" "$WRAP"
         build trace-sdk-pico2w  $P2                   "$S/DeviceDormantTrace" "$WRAP"
         # Adafruit TinyUSB with the spin lock leak fixed
-        for rev in $ADA_FIX $ADA_MASTER; do
+        for rev in $ADA_FIX; do
           git -C libraries/Adafruit_TinyUSB_Arduino fetch -q origin $rev
           git -C libraries/Adafruit_TinyUSB_Arduino checkout -q $rev
           tag=$([ $rev = $ADA_FIX ] && echo fix || echo master)
