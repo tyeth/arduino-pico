@@ -114,6 +114,17 @@ static uint32_t waitHost(uint32_t ms) {
     return millis() - t;
 }
 
+// Wait for a *new* MSC mount (mount count past `before`) with the filesystem up
+static bool waitRemount(uint32_t before, uint32_t ms) {
+    uint32_t t = millis();
+    while (!(fsMounted && mscMounts != before) && millis() - t < ms) {
+        flushEvents();
+        delay(10);
+    }
+    flushEvents();
+    return fsMounted && mscMounts != before;
+}
+
 static bool waitMounted(uint32_t ms) {
     uint32_t t = millis();
     while (!fsMounted && millis() - t < ms) {
@@ -198,15 +209,14 @@ void loop() {
     if (m == 'R') {
         forceReconnect();
         logf("RECONNECT forced %d t=%lu\n", n, (unsigned long)millis());
-        bool back = waitMounted(20000) && mscMounts != mountsBefore;
+        bool back = waitRemount(mountsBefore, 20000);
         logf("REMOUNT %d ok=%d t=%lu\n", n, (int)back, (unsigned long)millis());
     }
     bool ok = readTest("POST", n);
     if (!ok && m == 'L') {
         logf("RECOVER %d: read failed, forcing reconnect t=%lu\n", n, (unsigned long)millis());
         forceReconnect();
-        delay(200);
-        bool back = waitMounted(20000) && mscMounts != mountsBefore;
+        bool back = waitRemount(mountsBefore, 20000);
         logf("REMOUNT %d ok=%d t=%lu\n", n, (int)back, (unsigned long)millis());
         readTest("RETRY", n);
     }
