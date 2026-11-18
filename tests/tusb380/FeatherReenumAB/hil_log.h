@@ -2,6 +2,8 @@
 // debug printf (CFG_TUSB_DEBUG_PRINTF, which writes to SERIAL_TUSB_DEBUG) can target a lock-free ring buffer:
 // TinyUSB host logging runs on core1 (task and PIO-USB IRQ context) and must not block on USB CDC; core0 drains it.
 #pragma once
+#ifndef HIL_LOG_H
+#define HIL_LOG_H
 #ifdef __cplusplus
 #include <stddef.h>
 #include <stdint.h>
@@ -22,3 +24,4 @@ private:
 };
 extern HilLog hilLog;
 #endif
+#endif // HIL_LOG_H
