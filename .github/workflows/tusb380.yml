@@ -2,6 +2,7 @@
 # 3.8.0 (adafruit/Adafruit_TinyUSB_Arduino master 23e8953) against three arduino-pico cores:
 #   a = stock 6.4.0 (4a79653), b = stdio_flush fix (5cc2a3b), c = stdio_flush fix + LowPower stubs (88efd02),
 #   d = branch tinyusb-380-core-fixes as pushed (a + b + bundled library bumped to the 3.8.0 tag), its own submodule pointer
+#   e = d + rp2040 port CFG_TUH_ENUMERATION_BUFSIZE 256 -> 1024 (experiment: large composite devices fail enumeration)
 name: TinyUSB 3.8.0 link matrix
 
 on:
@@ -11,7 +12,7 @@ on:
     inputs:
       cores:
         description: 'JSON list of core variants to build'
-        default: '["a","b","c","d"]'
+        default: '["a","b","c","d","e"]'
 
 jobs:
   build:
@@ -36,7 +37,7 @@ jobs:
     - name: Adafruit_TinyUSB_Arduino -> 23e8953 (3.8.0), or the pointer of tinyusb-380-core-fixes for core d
       run: |
         SHA=23e8953f403c296127c5a57d798159468a9f1e57
-        if [ "${{ matrix.core }}" = d ]; then
+        if [ "${{ matrix.core }}" = d ] || [ "${{ matrix.core }}" = e ]; then
           git fetch origin tinyusb-380-core-fixes
           SHA=$(git rev-parse FETCH_HEAD:libraries/Adafruit_TinyUSB_Arduino)
           echo "core-fix branch $(git rev-parse --short FETCH_HEAD) pins Adafruit_TinyUSB_Arduino $SHA"
@@ -53,6 +54,11 @@ jobs:
           b) git checkout 5cc2a3b -- cores/rp2040/main.cpp
              git checkout 4a79653 -- libraries/LowPower/src/LowPower.cpp ;;
           c) : ;;
+          e) git fetch origin tinyusb-380-core-fixes
+             git checkout FETCH_HEAD -- cores libraries/LowPower
+             f=libraries/Adafruit_TinyUSB_Arduino/src/arduino/ports/rp2040/tusb_config_rp2040.h
+             sed -i 's/^#define CFG_TUH_ENUMERATION_BUFSIZE 256$/#define CFG_TUH_ENUMERATION_BUFSIZE 1024/' $f
+             grep -n "CFG_TUH_ENUMERATION_BUFSIZE" $f ;;
           d) git checkout FETCH_HEAD -- cores libraries/LowPower 2>/dev/null || { git fetch origin tinyusb-380-core-fixes; git checkout FETCH_HEAD -- cores libraries/LowPower; }
              git fetch origin tinyusb-380-core-fixes
              echo "diff of cores/ and libraries/LowPower vs the core-fix branch (expect empty):"
