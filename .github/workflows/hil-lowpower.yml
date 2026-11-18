@@ -84,6 +84,8 @@ jobs:
         build fixed-host-lowpower  $HP "$S/HostDormant"   pass
         build fixed-device-lowpower $DV "$S/DeviceDormant" pass
         build fixed-host-lowpower-rp2040 $HP2040 "$S/HostDormant" pass
+        build fixed-host-lowpower-picow pico:rp2040:rpipicow:usbstack=tinyusb_host "$S/HostDormant" pass
+        build fixed-device-lowpower-picow pico:rp2040:rpipicow:usbstack=tinyusb "$S/DeviceDormant" pass
         git status --short
         echo "================ SUMMARY"
         cat out/summary.txt
