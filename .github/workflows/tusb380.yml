@@ -138,6 +138,7 @@ jobs:
             build feather-tinyusb-FeatherMsc "$B:usbstack=tinyusb,freq=120" $S/FeatherMsc
             build feather-tinyusb-FeatherMscDiag "$B:usbstack=tinyusb,freq=120" $S/FeatherMscDiag
             build feather-tinyusb-HostWatch "$B:usbstack=tinyusb,freq=120" $S/HostWatch
+            build feather-tinyusb-FeatherMscFix "$B:usbstack=tinyusb,freq=120" $S/FeatherMscFix
             build feather-tinyusb_host-host_device_info "$B:usbstack=tinyusb_host,freq=120" $L/Host/Simple/host_device_info
             ;;
         esac
