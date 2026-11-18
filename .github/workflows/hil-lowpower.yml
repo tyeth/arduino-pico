@@ -4,7 +4,7 @@ name: HIL LowPower TinyUSB builds
 
 on:
   push:
-    branches: [hil/lowpower-tinyusb-test]
+    branches: [hil/lowpower-tinyusb-test, hil/dormant-hang-debug]
   workflow_dispatch:
 
 jobs:
@@ -38,70 +38,48 @@ jobs:
       run: |
         set -u
         STOCK=4a79653   # tag 6.4.0
+        ADA_FIX=762f25af2f0b1a7feb8a7afaa03b864b7c1a01ed   # Adafruit_TinyUSB_Arduino: TinyUSB core with rp2usb_deinit + osal_spin_deinit
+        ADA_MASTER=eba909e3c59240905d3b089efb2b30a49213ca34
+        WRAP="-Wl,--wrap=tud_deinit,--wrap=tud_rhport_init,--wrap=panic"
         mkdir -p out
         : > out/summary.txt
         build() {
-          local name=$1 fqbn=$2 sketch=$3 expect=$4
+          local name=$1 fqbn=$2 sketch=$3 elf=${4:-}
           local bp=/tmp/build-$name
           mkdir -p out/$name
           set +e
-          arduino-cli compile --fqbn "$fqbn" --build-path "$bp" \
-            --build-property "compiler.c.extra_flags=-Wall -Wextra" \
-            --build-property "compiler.cpp.extra_flags=-Wall -Wextra" \
-            "$sketch" > out/$name/build.log 2>&1
+          arduino-cli compile --fqbn "$fqbn" --build-path "$bp"             --build-property "compiler.c.elf.extra_flags=$elf"             "$sketch" > out/$name/build.log 2>&1
           local rc=$?
           set -e
           cp "$bp"/*.elf "$bp"/*.uf2 "$bp"/*.map out/$name/ 2>/dev/null || true
-          local dup=$(grep -c "multiple definition" out/$name/build.log || true)
-          local pulled="-"
-          if ls "$bp"/*.map >/dev/null 2>&1; then
-            pulled=$(grep -oE "libpico\.a\((usbd|tusb|tusb_fifo|cdc_device)\.c\.o\)" "$bp"/*.map | sort -u | tr '\n' ' ')
-            [ -n "$pulled" ] || pulled="none"
-          fi
-          local size=$(grep -oE "(Sketch uses [0-9]+ bytes|Global variables use [0-9]+ bytes)" out/$name/build.log | grep -oE "[0-9]+" | tr '\n' '/' )
-          echo "$name rc=$rc expect=$expect flash/ram=$size multiple_definition=$dup libpico_tinyusb_members=[$pulled]" | tee -a out/summary.txt
-          grep -n -E "(LowPower|main)\.cpp:[0-9]+:[0-9]+: warning" out/$name/build.log | tee -a out/summary.txt || true
-          if [ -f "$bp"/*.map ]; then
-            grep -n -B1 -A1 -E "^ *tud_inited|^ *tud_deinit|^ *tud_rhport_init|\(tud_inited\)|\(tud_cdc_n_write_flush\)" "$bp"/*.map | head -20 > out/$name/tud_symbols.txt || true
-          fi
+          local size=$(grep -oE "(Sketch uses [0-9]+ bytes|Global variables use [0-9]+ bytes)" out/$name/build.log | grep -oE "[0-9]+" | tr '
+' '/' )
+          echo "$name rc=$rc flash/ram=$size tinyusb=$(git -C libraries/Adafruit_TinyUSB_Arduino rev-parse --short HEAD)" | tee -a out/summary.txt
           tail -25 out/$name/build.log
         }
-        HP=pico:rp2040:rpipico2w:usbstack=tinyusb_host
-        DV=pico:rp2040:rpipico2w:usbstack=tinyusb
-        HP2040=pico:rp2040:rpipico:usbstack=tinyusb_host
         S=tests/hil-lowpower
-
-        # 1. stock 6.4.0 core + LowPower
+        PW=pico:rp2040:rpipicow
+        P2=pico:rp2040:rpipico2w
+        # stock 6.4.0 core + LowPower, Adafruit TinyUSB 3.7.7 (08c7dab)
         git checkout $STOCK -- cores/rp2040/main.cpp libraries/LowPower/src/LowPower.cpp
-        build stock-host-plain     $HP "$S/HostPlain"     fail
-        build stock-host-lowpower  $HP "$S/HostDormant"   fail
-        build stock-device-lowpower $DV "$S/DeviceDormant" pass
-        build stock-device-lowpower-picow pico:rp2040:rpipicow:usbstack=tinyusb "$S/DeviceDormant" pass
-        build stock-plain-nousb-picow pico:rp2040:rpipicow:usbstack=nousb "$S/PlainDormant" pass
-        build stock-feather-piohost-lowpower pico:rp2040:adafruit_feather_usb_host:usbstack=tinyusb,freq=120 "$S/FeatherPioHostDormant" pass
-        # 2. stdio_flush fix only
-        git checkout HEAD -- cores/rp2040/main.cpp
-        build stdio-host-plain     $HP "$S/HostPlain"     pass
-        build stdio-host-lowpower  $HP "$S/HostDormant"   fail
-        # 3. both fixes
-        git checkout HEAD -- libraries/LowPower/src/LowPower.cpp
-        build fixed-host-plain     $HP "$S/HostPlain"     pass
-        build fixed-host-lowpower  $HP "$S/HostDormant"   pass
-        build fixed-device-lowpower $DV "$S/DeviceDormant" pass
-        build fixed-host-lowpower-rp2040 $HP2040 "$S/HostDormant" pass
-        build fixed-host-lowpower-picow pico:rp2040:rpipicow:usbstack=tinyusb_host "$S/HostDormant" pass
-        build fixed-device-lowpower-picow pico:rp2040:rpipicow:usbstack=tinyusb "$S/DeviceDormant" pass
-        build plain-picosdk-picow pico:rp2040:rpipicow "$S/PlainDormant" pass
-        build plain-nousb-picow pico:rp2040:rpipicow:usbstack=nousb "$S/PlainDormant" pass
-        build plain-picosdk-pico pico:rp2040:rpipico "$S/PlainDormant" pass
-        build plain-nousb-pico pico:rp2040:rpipico:usbstack=nousb "$S/PlainDormant" pass
-        build fixed-device-lowpower-pico pico:rp2040:rpipico:usbstack=tinyusb "$S/DeviceDormant" pass
-        build quiet-device-picow pico:rp2040:rpipicow:usbstack=tinyusb "$S/DeviceDormantQuiet" pass
-        build fixed-feather-piohost-lowpower pico:rp2040:adafruit_feather_usb_host:usbstack=tinyusb,freq=120 "$S/FeatherPioHostDormant" pass
+        build trace-ada-picow   $PW:usbstack=tinyusb  "$S/DeviceDormantTrace" "$WRAP"
+        build trace-ada-pico2w  $P2:usbstack=tinyusb  "$S/DeviceDormantTrace" "$WRAP"
+        build trace-sdk-picow   $PW                   "$S/DeviceDormantTrace" "$WRAP"
+        build trace-sdk-pico2w  $P2                   "$S/DeviceDormantTrace" "$WRAP"
+        # Adafruit TinyUSB with the spin lock leak fixed
+        for rev in $ADA_FIX $ADA_MASTER; do
+          git -C libraries/Adafruit_TinyUSB_Arduino fetch -q origin $rev
+          git -C libraries/Adafruit_TinyUSB_Arduino checkout -q $rev
+          tag=$([ $rev = $ADA_FIX ] && echo fix || echo master)
+          build trace-$tag-picow   $PW:usbstack=tinyusb  "$S/DeviceDormantTrace" "$WRAP"
+          build trace-$tag-pico2w  $P2:usbstack=tinyusb  "$S/DeviceDormantTrace" "$WRAP"
+          build quiet-$tag-picow   $PW:usbstack=tinyusb  "$S/DeviceDormantQuiet"
+          build quiet-$tag-pico2w  $P2:usbstack=tinyusb  "$S/DeviceDormantQuiet"
+        done
         git status --short
         echo "================ SUMMARY"
         cat out/summary.txt
     - uses: actions/upload-artifact@v7
       with:
-        name: hil-lowpower-builds
+        name: hil-lowpower-trace-builds
         path: out/
