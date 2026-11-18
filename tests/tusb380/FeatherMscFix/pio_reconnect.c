@@ -2,9 +2,11 @@
 // Marks the root port disconnected and fails its queued transfers, exactly as connection_check() does when it sees
 // SE0.  The next SOF frame then re-detects the attached device and TinyUSB re-enumerates it.  Call on the core that
 // runs the PIO-USB host (core1 here).
+#include <stdbool.h>
+#include <stdint.h>
+#include "hardware/sync.h"
 #include "pio_usb.h"
 #include "pio_usb_ll.h"
-#include "hardware/sync.h"
 
 void pio_usb_force_reconnect(uint8_t root_idx) {
     uint32_t s = save_and_disable_interrupts();
