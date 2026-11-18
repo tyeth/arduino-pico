@@ -33,6 +33,7 @@ jobs:
         ln -s "$GITHUB_WORKSPACE" ~/Arduino/hardware/pico/rp2040
         arduino-cli core list
         arduino-cli board listall | grep -i -E "rpipico2w|rpipico\b" | head
+        arduino-cli lib install "Pico PIO USB"
     - name: Build matrix
       run: |
         set -u
@@ -86,6 +87,7 @@ jobs:
         build fixed-host-lowpower-rp2040 $HP2040 "$S/HostDormant" pass
         build fixed-host-lowpower-picow pico:rp2040:rpipicow:usbstack=tinyusb_host "$S/HostDormant" pass
         build fixed-device-lowpower-picow pico:rp2040:rpipicow:usbstack=tinyusb "$S/DeviceDormant" pass
+        build fixed-feather-piohost-lowpower pico:rp2040:adafruit_feather_usb_host:usbstack=tinyusb,freq=120 "$S/FeatherPioHostDormant" pass
         git status --short
         echo "================ SUMMARY"
         cat out/summary.txt
