@@ -38,9 +38,26 @@ static void addEv(char kind, uint8_t addr) {
     evHead = evHead + 1;
 }
 
+// Configuration descriptor header of the last mounted device: wTotalLength shows whether a composite
+// device's descriptor fits the host enumeration buffer (CFG_TUH_ENUMERATION_BUFSIZE)
+static uint8_t cfgHdr[9];
+static volatile uint16_t cfgTotal = 0;
+static volatile uint8_t cfgItf = 0;
+
+static void cfgHdrCb(tuh_xfer_t *xfer) {
+    if (xfer->result == XFER_RESULT_SUCCESS) {
+        cfgTotal = (uint16_t)(cfgHdr[2] | (cfgHdr[3] << 8));
+        cfgItf = cfgHdr[4];
+        addEv('C', xfer->daddr);
+    } else {
+        addEv('c', xfer->daddr);
+    }
+}
+
 extern "C" {
     void tuh_mount_cb(uint8_t addr) {
         addEv('M', addr);
+        tuh_descriptor_get_configuration(addr, 0, cfgHdr, sizeof(cfgHdr), cfgHdrCb, 0);
     }
     void tuh_umount_cb(uint8_t addr) {
         addEv('U', addr);
@@ -105,7 +122,12 @@ static void dumpVbus(const char *tag, int n) {
 static void flushEvents() {
     while (evPrinted < evHead) {
         const Ev &e = evs[evPrinted % 32];
-        logf("EV %c t=%lu addr=%u\n", e.kind, (unsigned long)e.ms, e.addr);
+        if (e.kind == 'C') {
+            logf("EV C t=%lu addr=%u config wTotalLength=%u interfaces=%u enum_bufsize=%u\n", (unsigned long)e.ms, e.addr,
+                 (unsigned)cfgTotal, (unsigned)cfgItf, (unsigned)CFG_TUH_ENUMERATION_BUFSIZE);
+        } else {
+            logf("EV %c t=%lu addr=%u\n", e.kind, (unsigned long)e.ms, e.addr);
+        }
         evPrinted++;
     }
 }
