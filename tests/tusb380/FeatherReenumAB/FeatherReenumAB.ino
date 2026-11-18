@@ -102,7 +102,7 @@ void loop1() {
     USBHost.task();
 }
 
-static void logf(const char *fmt, ...) {
+static void plog(const char *fmt, ...) {
     char buf[220];
     va_list ap;
     va_start(ap, fmt);
@@ -134,7 +134,7 @@ static void idle(uint32_t ms) {
 static void dumpRoot(const char *tag) {
     uint8_t r[5];
     pio_usb_root_state(0, r);
-    logf("ROOT %s t=%lu connected=%u suspended=%u line=%u msc=%lu dev=%lu logdrop=%lu\n", tag, (unsigned long)millis(),
+    plog("ROOT %s t=%lu connected=%u suspended=%u line=%u msc=%lu dev=%lu logdrop=%lu\n", tag, (unsigned long)millis(),
          r[1], r[2], r[4], (unsigned long)mscMounts, (unsigned long)devMounts, (unsigned long)hilLog.dropped());
 }
 
@@ -145,7 +145,7 @@ static void core1Do(uint8_t cmd) {
         drainLog();
         delay(1);
     }
-    logf("CORE1 cmd=%u took=%lums\n", cmd, (unsigned long)(millis() - t));
+    plog("CORE1 cmd=%u took=%lums\n", cmd, (unsigned long)(millis() - t));
 }
 
 // Wait for a new device mount (tuh_mount_cb) with the filesystem up
@@ -171,10 +171,10 @@ static int reconnect(const char *ph, int i) {
     for (int a = 1; a <= 3; a++) {
         uint32_t mscBefore = mscMounts, devBefore = devMounts;
         uint32_t t0 = millis();
-        logf("RECONNECT %s %d attempt=%d t=%lu\n", ph, i, a, (unsigned long)t0);
+        plog("RECONNECT %s %d attempt=%d t=%lu\n", ph, i, a, (unsigned long)t0);
         core1Do(1);
         bool back = waitRemount(mscBefore, devBefore, 15000);
-        logf("REMOUNT %s %d attempt=%d ok=%d after=%lums\n", ph, i, a, (int)back, (unsigned long)(millis() - t0));
+        plog("REMOUNT %s %d attempt=%d ok=%d after=%lums\n", ph, i, a, (int)back, (unsigned long)(millis() - t0));
         if (back) {
             return a;
         }
@@ -186,13 +186,13 @@ static int reconnect(const char *ph, int i) {
 
 static bool readTest(const char *ph, int i) {
     if (!fsMounted) {
-        logf("READ %s %d ok=0 no_fs\n", ph, i);
+        plog("READ %s %d ok=0 no_fs\n", ph, i);
         return false;
     }
     uint32_t t0 = millis();
     FatFile root, f;
     if (!root.openRoot(&fatfs)) {
-        logf("READ %s %d ok=0 openRoot_failed\n", ph, i);
+        plog("READ %s %d ok=0 openRoot_failed\n", ph, i);
         return false;
     }
     int got = -1, entries = 0;
@@ -206,13 +206,13 @@ static bool readTest(const char *ph, int i) {
     }
     root.close();
     bool ok = entries > 0 && got >= 0;
-    logf("READ %s %d ok=%d entries=%d after=%lums\n", ph, i, (int)ok, entries, (unsigned long)(millis() - t0));
+    plog("READ %s %d ok=%d entries=%d after=%lums\n", ph, i, (int)ok, entries, (unsigned long)(millis() - t0));
     return ok;
 }
 
 static void ensureMounted(const char *ph, int i) {
     if (!waitMounted(20000)) {
-        logf("NODEV %s %d\n", ph, i);
+        plog("NODEV %s %d\n", ph, i);
         dumpRoot("nodev");
         reconnect("fix", i);
     }
@@ -224,7 +224,7 @@ void setup() {
     while (!(TinyUSBDevice.mounted() && Serial) && millis() - t < 60000) {
         idle(10);
     }
-    logf("HIL380 reenumAB start clk_sys=%lu debug=%d A=%d B=%d C=%d\n", (unsigned long)clock_get_hz(clk_sys),
+    plog("HIL380 reenumAB start clk_sys=%lu debug=%d A=%d B=%d C=%d\n", (unsigned long)clock_get_hz(clk_sys),
          CFG_TUSB_DEBUG, N_A, N_B, N_C);
 }
 
@@ -233,7 +233,7 @@ void loop() {
     const char *ph = phase == 0 ? "A" : phase == 1 ? "B" : "C";
     int nmax = phase == 0 ? N_A : phase == 1 ? N_B : N_C;
     if (phase > 2) {
-        logf("HIL380 reenumAB fix DONE\n"); // "fix DONE" ends the bench logger/orchestrator
+        plog("HIL380 reenumAB fix DONE\n"); // "fix DONE" ends the bench logger/orchestrator
         idle(3000);
         return;
     }
@@ -246,23 +246,23 @@ void loop() {
     readTest(ph, i);
     if (phase == 0) {
         int a = reconnect("A", i);
-        logf("RESULT A %d first_try=%d attempt=%d\n", i, (int)(a == 1), a);
+        plog("RESULT A %d first_try=%d attempt=%d\n", i, (int)(a == 1), a);
     } else if (phase == 1) {
         uint32_t mscBefore = mscMounts, devBefore = devMounts;
         uint32_t t0 = millis();
-        logf("ENTER B %d: power-cycle the device; host stays awake and SOFing\n", i);
+        plog("ENTER B %d: power-cycle the device; host stays awake and SOFing\n", i);
         bool back = waitRemount(mscBefore, devBefore, 40000);
-        logf("REMOUNT B %d natural ok=%d after=%lums\n", i, (int)back, (unsigned long)(millis() - t0));
+        plog("REMOUNT B %d natural ok=%d after=%lums\n", i, (int)back, (unsigned long)(millis() - t0));
         int a = back ? 0 : reconnect("B", i);
-        logf("RESULT B %d first_try=%d attempt=%d\n", i, (int)back, back ? 0 : a);
+        plog("RESULT B %d first_try=%d attempt=%d\n", i, (int)back, back ? 0 : a);
     } else {
         core1Do(2);
         dumpRoot("silenced");
-        logf("ENTER C %d: power-cycle the device; root port silenced (no SOF)\n", i);
+        plog("ENTER C %d: power-cycle the device; root port silenced (no SOF)\n", i);
         idle(15000);
         dumpRoot("pre-reconnect");
         int a = reconnect("C", i);
-        logf("RESULT C %d first_try=%d attempt=%d\n", i, (int)(a == 1), a);
+        plog("RESULT C %d first_try=%d attempt=%d\n", i, (int)(a == 1), a);
     }
     readTest(ph, i);
     idle(1000);
