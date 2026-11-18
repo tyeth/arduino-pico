@@ -33,7 +33,8 @@ jobs:
         ln -s "$GITHUB_WORKSPACE" ~/Arduino/hardware/pico/rp2040
         arduino-cli core list
         arduino-cli board listall | grep -i -E "rpipico2w|rpipico\b" | head
-        arduino-cli lib install "Pico PIO USB"
+        arduino-cli lib install --no-deps "Pico PIO USB"
+        arduino-cli lib list
     - name: Build matrix
       run: |
         set -u
