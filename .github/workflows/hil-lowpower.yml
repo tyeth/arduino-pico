@@ -78,6 +78,7 @@ jobs:
         build stock-device-lowpower $DV "$S/DeviceDormant" pass
         build stock-device-lowpower-picow pico:rp2040:rpipicow:usbstack=tinyusb "$S/DeviceDormant" pass
         build stock-plain-nousb-picow pico:rp2040:rpipicow:usbstack=nousb "$S/PlainDormant" pass
+        build stock-feather-piohost-lowpower pico:rp2040:adafruit_feather_usb_host:usbstack=tinyusb,freq=120 "$S/FeatherPioHostDormant" pass
         # 2. stdio_flush fix only
         git checkout HEAD -- cores/rp2040/main.cpp
         build stdio-host-plain     $HP "$S/HostPlain"     pass
