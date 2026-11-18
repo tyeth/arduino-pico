@@ -48,12 +48,11 @@ jobs:
           local bp=/tmp/build-$name
           mkdir -p out/$name
           set +e
-          arduino-cli compile --fqbn "$fqbn" --build-path "$bp"             --build-property "compiler.c.elf.extra_flags=$elf"             "$sketch" > out/$name/build.log 2>&1
+          arduino-cli compile --fqbn "$fqbn" --build-path "$bp" --build-property "compiler.c.elf.extra_flags=$elf" "$sketch" > out/$name/build.log 2>&1
           local rc=$?
           set -e
           cp "$bp"/*.elf "$bp"/*.uf2 "$bp"/*.map out/$name/ 2>/dev/null || true
-          local size=$(grep -oE "(Sketch uses [0-9]+ bytes|Global variables use [0-9]+ bytes)" out/$name/build.log | grep -oE "[0-9]+" | tr '
-' '/' )
+          local size=$(grep -oE "(Sketch uses [0-9]+ bytes|Global variables use [0-9]+ bytes)" out/$name/build.log | grep -oE "[0-9]+" | tr '\n' '/' )
           echo "$name rc=$rc flash/ram=$size tinyusb=$(git -C libraries/Adafruit_TinyUSB_Arduino rev-parse --short HEAD)" | tee -a out/summary.txt
           tail -25 out/$name/build.log
         }
