@@ -168,7 +168,7 @@ void loop() {
     if (m == 'L') {
         Serial.printf("ENTER L %d: light sleep 3 s, nothing to do\n", n);
     } else if (m == 'B') {
-        Serial.printf("ENTER B %d: leave the reader in; pull GPIO7 to GND (button / jumper) to wake\n", n);
+        Serial.printf("ENTER B %d: leave the reader in; pull D5 (GPIO5) to GND to wake\n", n);
     } else {
         Serial.printf("ENTER R %d: unplug and re-insert the reader to wake (wake pin %d)\n", n, replugPin);
     }
