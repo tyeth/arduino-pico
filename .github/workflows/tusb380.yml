@@ -1,0 +1,122 @@
+# Throwaway test workflow (fork only, branch hil/tinyusb-380-matrix): link matrix for Adafruit TinyUSB
+# 3.8.0 (adafruit/Adafruit_TinyUSB_Arduino master 23e8953) against three arduino-pico cores:
+#   a = stock 6.4.0 (4a79653), b = stdio_flush fix (5cc2a3b), c = stdio_flush fix + LowPower stubs (88efd02)
+name: TinyUSB 3.8.0 link matrix
+
+on:
+  push:
+    branches: [hil/tinyusb-380-matrix]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [a, b, c]
+        target: [picow, pico2w, feather]
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: true
+        fetch-depth: 0
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.x'
+    - name: Init pico-sdk submodules
+      run: |
+        cd pico-sdk
+        git submodule update --init
+    - name: Adafruit_TinyUSB_Arduino -> 23e8953 (3.8.0)
+      run: |
+        cd libraries/Adafruit_TinyUSB_Arduino
+        git fetch origin 23e8953f403c296127c5a57d798159468a9f1e57
+        git checkout --detach 23e8953f403c296127c5a57d798159468a9f1e57
+        git log -1 --oneline
+        grep version= library.properties
+    - name: Core variant ${{ matrix.core }}
+      run: |
+        case "${{ matrix.core }}" in
+          a) git checkout 4a79653 -- cores/rp2040/main.cpp libraries/LowPower/src/LowPower.cpp ;;
+          b) git checkout 5cc2a3b -- cores/rp2040/main.cpp
+             git checkout 4a79653 -- libraries/LowPower/src/LowPower.cpp ;;
+          c) : ;;
+        esac
+        git status --short cores libraries/LowPower
+        git diff --stat HEAD -- cores libraries/LowPower
+    - name: Get toolchain
+      run: |
+        cd tools
+        python3 get.py
+    - uses: arduino/setup-arduino-cli@v2
+    - name: Link core into sketchbook, install libraries without dependencies
+      run: |
+        mkdir -p ~/Arduino/hardware/pico
+        ln -s "$GITHUB_WORKSPACE" ~/Arduino/hardware/pico/rp2040
+        arduino-cli core list
+        arduino-cli lib install --no-deps "Pico PIO USB"
+        arduino-cli lib install --no-deps "SdFat - Adafruit Fork"
+        arduino-cli lib list
+        if ls ~/Arduino/libraries | grep -i tinyusb; then echo "::error::a TinyUSB library got installed into the sketchbook"; exit 1; fi
+    - name: Build
+      run: |
+        set -u
+        mkdir -p out
+        : > out/summary.txt
+        CORE=${{ matrix.core }}
+        build() {
+          local name=$1 fqbn=$2 sketch=$3
+          local bp=/tmp/build-$name
+          mkdir -p out/$name
+          set +e
+          arduino-cli compile -v --fqbn "$fqbn" --build-path "$bp" "$sketch" > out/$name/build.log 2>&1
+          local rc=$?
+          set -e
+          cp "$bp"/*.elf "$bp"/*.uf2 "$bp"/*.map out/$name/ 2>/dev/null || true
+          local tusb=$(grep -m1 -oE "Using library Adafruit TinyUSB Library at version [^ ]+ in folder: [^ ]+" out/$name/build.log | sed -E 's/Using library Adafruit TinyUSB Library at version ([^ ]+) in folder: (.*)/\1@\2/')
+          [ -n "$tusb" ] || tusb="none"
+          local dup=$(grep -c "multiple definition" out/$name/build.log || true)
+          local undef=$(grep -c "undefined reference" out/$name/build.log || true)
+          local pulled="-"
+          if ls "$bp"/*.map >/dev/null 2>&1; then
+            pulled=$(grep -oE "libpico\.a\((usbd|tusb|tusb_fifo|cdc_device)\.c\.o\)" "$bp"/*.map | sort -u | sed 's/libpico.a(//;s/.c.o)//' | tr '\n' ',' )
+            [ -n "$pulled" ] || pulled="none"
+          fi
+          local size=$(grep -oE "(Sketch uses [0-9]+ bytes|Global variables use [0-9]+ bytes)" out/$name/build.log | grep -oE "[0-9]+" | tr '\n' '/')
+          echo "core=$CORE $name rc=$rc tinyusb=$tusb dup=$dup undef=$undef libpico_tusb=[$pulled] flash/ram=$size" | tee -a out/summary.txt
+          if [ $rc -ne 0 ]; then grep -E "error|multiple definition|undefined reference" out/$name/build.log | head -8; fi
+        }
+        S=tests/tusb380
+        L=libraries/Adafruit_TinyUSB_Arduino/examples
+        case "${{ matrix.target }}" in
+          picow|pico2w)
+            B=pico:rp2040:rpi${{ matrix.target }}
+            for st in tinyusb tinyusb_host picosdk nousb; do
+              build ${{ matrix.target }}-$st-Plain "$B:usbstack=$st" $S/Plain
+              build ${{ matrix.target }}-$st-LP "$B:usbstack=$st" $S/LP
+            done
+            for st in tinyusb tinyusb_host; do
+              build ${{ matrix.target }}-$st-LPWiFi "$B:usbstack=$st" $S/LPWiFi
+              build ${{ matrix.target }}-$st-HwCycles "$B:usbstack=$st" $S/HwCycles
+            done
+            build ${{ matrix.target }}-tinyusb_host-host_device_info "$B:usbstack=tinyusb_host" $L/Host/Simple/host_device_info
+            ;;
+          feather)
+            B=pico:rp2040:adafruit_feather_usb_host
+            for st in tinyusb tinyusb_host picosdk nousb; do
+              build feather-$st-Plain "$B:usbstack=$st,freq=120" $S/Plain
+              build feather-$st-LP "$B:usbstack=$st,freq=120" $S/LP
+            done
+            build feather-tinyusb-msc_file_explorer "$B:usbstack=tinyusb,freq=120" $L/DualRole/MassStorage/msc_file_explorer
+            build feather-tinyusb-FeatherMsc "$B:usbstack=tinyusb,freq=120" $S/FeatherMsc
+            build feather-tinyusb_host-host_device_info "$B:usbstack=tinyusb_host,freq=120" $L/Host/Simple/host_device_info
+            ;;
+        esac
+        echo "================ SUMMARY"
+        cat out/summary.txt
+    - uses: actions/upload-artifact@v7
+      if: always()
+      with:
+        name: tusb380-${{ matrix.core }}-${{ matrix.target }}
+        path: out/
