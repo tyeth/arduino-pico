@@ -5,6 +5,7 @@
 #   e = d + rp2040 port CFG_TUH_ENUMERATION_BUFSIZE 256 -> 1024 (experiment: large composite devices fail enumeration)
 #   u = upstream a88e436 (earlephilhower/arduino-pico#3639 host guard) + library 3.8.0, without the stdio refinement or stubs
 #   f = d + tests/tusb380/patches/fix_msc_host.py (MSC host: fail-complete instead of TU_ASSERT, wait_for_io timeout, csw status)
+#   g = f + tests/tusb380/patches/fix_enum.py (SET_CONFIGURATION STALL re-enumerates; MSC set_config chain bounded and always completes)
 name: TinyUSB 3.8.0 link matrix
 
 on:
@@ -39,7 +40,7 @@ jobs:
     - name: Adafruit_TinyUSB_Arduino -> 23e8953 (3.8.0), or the pointer of tinyusb-380-core-fixes for core d
       run: |
         SHA=23e8953f403c296127c5a57d798159468a9f1e57
-        if [ "${{ matrix.core }}" = d ] || [ "${{ matrix.core }}" = e ] || [ "${{ matrix.core }}" = f ] || [ "${{ matrix.core }}" = u ]; then
+        if [ "${{ matrix.core }}" = d ] || [ "${{ matrix.core }}" = e ] || [ "${{ matrix.core }}" = f ] || [ "${{ matrix.core }}" = g ] || [ "${{ matrix.core }}" = u ]; then
           git fetch origin tinyusb-380-core-fixes
           SHA=$(git rev-parse FETCH_HEAD:libraries/Adafruit_TinyUSB_Arduino)
           echo "core-fix branch $(git rev-parse --short FETCH_HEAD) pins Adafruit_TinyUSB_Arduino $SHA"
@@ -68,6 +69,11 @@ jobs:
           f) git fetch origin tinyusb-380-core-fixes
              git checkout FETCH_HEAD -- cores libraries/LowPower
              python3 tests/tusb380/patches/fix_msc_host.py libraries/Adafruit_TinyUSB_Arduino
+             git -C libraries/Adafruit_TinyUSB_Arduino diff --stat ;;
+          g) git fetch origin tinyusb-380-core-fixes
+             git checkout FETCH_HEAD -- cores libraries/LowPower
+             python3 tests/tusb380/patches/fix_msc_host.py libraries/Adafruit_TinyUSB_Arduino
+             python3 tests/tusb380/patches/fix_enum.py libraries/Adafruit_TinyUSB_Arduino
              git -C libraries/Adafruit_TinyUSB_Arduino diff --stat ;;
           d) git checkout FETCH_HEAD -- cores libraries/LowPower 2>/dev/null || { git fetch origin tinyusb-380-core-fixes; git checkout FETCH_HEAD -- cores libraries/LowPower; }
              git fetch origin tinyusb-380-core-fixes

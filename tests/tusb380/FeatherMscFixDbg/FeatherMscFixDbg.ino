@@ -15,7 +15,7 @@
 #include <hardware/clocks.h>
 #include <hardware/sync.h>
 
-static const char sched[] = "LRLRLR";
+static const char sched[] = "LRLRLRLRLRLR";
 
 Adafruit_USBH_Host USBHost;
 Adafruit_USBH_MSC_BlockDevice msc_block_dev;
@@ -204,6 +204,24 @@ static void forceReconnect() {
     }
 }
 
+// Up to 3 forced reconnects (the first one included), each waiting for a new full mount; logs every attempt
+static bool recoverMount(int n, const char *why) {
+    for (int a = 1; a <= 3; a++) {
+        uint32_t mscBefore = mscMounts, devBefore = devMounts;
+        logf("RECOVER %d %s attempt=%d t=%lu\n", n, why, a, (unsigned long)millis());
+        dumpRoot("before");
+        forceReconnect();
+        bool back = waitRemount(mscBefore, devBefore, 10000);
+        logf("REMOUNT %d %s attempt=%d ok=%d t=%lu\n", n, why, a, (int)back, (unsigned long)millis());
+        if (back) {
+            return true;
+        }
+        delay(2000);
+        flushEvents();
+    }
+    return false;
+}
+
 // List the root directory and read the start of the first regular file
 static bool readTest(const char *tag, int n) {
     if (!fsMounted) {
@@ -255,35 +273,31 @@ void loop() {
         return;
     }
     char m = sched[n];
-    if (!waitMounted(60000)) {
+    if (!waitMounted(30000)) {
         logf("CYCLE %d mode=%c NO_DEVICE\n", n, m);
         dumpRoot("nodev");
-        n++;
-        return;
+        if (!recoverMount(n, "nodev")) {
+            logf("CYCLE %d still no device; sleeping anyway so the bench swaps it\n", n);
+        }
     }
-    readTest("PRE", n);
+    if (fsMounted) {
+        readTest("PRE", n);
+    }
     logf("ENTER %c %d: light sleep 15 s; swap (power-cycle) the USB-A device now\n", m, n);
     delay(200);
-    uint32_t mscBefore = mscMounts, devBefore = devMounts;
     int rc = LowPower.sleepFor(15000);
     waitHost(30000);
     logf("WAKE %c %d rc=%d t=%lu\n", m, n, rc, (unsigned long)millis());
     dumpRoot("wake");
     flushEvents();
     if (m == 'R') {
-        forceReconnect();
-        logf("RECONNECT forced %d t=%lu\n", n, (unsigned long)millis());
-        bool back = waitRemount(mscBefore, devBefore, 20000);
-        logf("REMOUNT %d ok=%d t=%lu\n", n, (int)back, (unsigned long)millis());
+        recoverMount(n, "wake");
     }
     bool ok = readTest("POST", n);
     if (!ok && m == 'L') {
-        logf("RECOVER %d: read failed, forcing reconnect t=%lu\n", n, (unsigned long)millis());
-        dumpRoot("before");
-        forceReconnect();
-        bool back = waitRemount(mscBefore, devBefore, 20000);
-        logf("REMOUNT %d ok=%d t=%lu\n", n, (int)back, (unsigned long)millis());
-        readTest("RETRY", n);
+        if (recoverMount(n, "readfail")) {
+            readTest("RETRY", n);
+        }
     }
     flushEvents();
     n++;
