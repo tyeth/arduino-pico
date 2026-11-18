@@ -97,11 +97,13 @@ jobs:
         : > out/summary.txt
         CORE=${{ matrix.core }}
         build() {
-          local name=$1 fqbn=$2 sketch=$3
+          local name=$1 fqbn=$2 sketch=$3 xf=${4:-}
           local bp=/tmp/build-$name
+          local props=()
+          if [ -n "$xf" ]; then props=(--build-property "compiler.c.extra_flags=$xf" --build-property "compiler.cpp.extra_flags=$xf"); fi
           mkdir -p out/$name
           set +e
-          arduino-cli compile -v --fqbn "$fqbn" --build-path "$bp" "$sketch" > out/$name/build.log 2>&1
+          arduino-cli compile -v --fqbn "$fqbn" --build-path "$bp" "${props[@]}" "$sketch" > out/$name/build.log 2>&1
           local rc=$?
           set -e
           cp "$bp"/*.elf "$bp"/*.uf2 "$bp"/*.map out/$name/ 2>/dev/null || true
@@ -144,6 +146,8 @@ jobs:
             build feather-tinyusb-FeatherMscDiag "$B:usbstack=tinyusb,freq=120" $S/FeatherMscDiag
             build feather-tinyusb-HostWatch "$B:usbstack=tinyusb,freq=120" $S/HostWatch
             build feather-tinyusb-FeatherMscFix "$B:usbstack=tinyusb,freq=120" $S/FeatherMscFix
+            DBG="-DCFG_TUSB_DEBUG=2 -DCFG_TUD_LOG_LEVEL=3 -DCFG_TUSB_DEBUG_PRINTF=hil_tusb_printf -DSERIAL_TUSB_DEBUG=hilLog -include $GITHUB_WORKSPACE/$S/FeatherMscFixDbg/hil_log.h"
+            build feather-tinyusb-FeatherMscFixDbg "$B:usbstack=tinyusb,freq=120" $S/FeatherMscFixDbg "$DBG"
             build feather-tinyusb_host-host_device_info "$B:usbstack=tinyusb_host,freq=120" $L/Host/Simple/host_device_info
             ;;
         esac
