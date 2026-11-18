@@ -75,7 +75,13 @@ jobs:
           build trace-$tag-pico2w  $P2:usbstack=tinyusb  "$S/DeviceDormantTrace" "$WRAP"
           build quiet-$tag-picow   $PW:usbstack=tinyusb  "$S/DeviceDormantQuiet"
           build quiet-$tag-pico2w  $P2:usbstack=tinyusb  "$S/DeviceDormantQuiet"
+          build quiet-$tag-pico    pico:rp2040:rpipico:usbstack=tinyusb "$S/DeviceDormantQuiet"
+          build feather-piohost-$tag pico:rp2040:adafruit_feather_usb_host:usbstack=tinyusb,freq=120 "$S/FeatherPioHostDormant"
         done
+        # host mode needs the stdio_flush fix + LowPower stubs (branch HEAD versions)
+        git checkout HEAD -- cores/rp2040/main.cpp libraries/LowPower/src/LowPower.cpp
+        build host-fix-pico2w $P2:usbstack=tinyusb_host "$S/HostDormant"
+        build host-fix-picow  $PW:usbstack=tinyusb_host "$S/HostDormant"
         git status --short
         echo "================ SUMMARY"
         cat out/summary.txt
