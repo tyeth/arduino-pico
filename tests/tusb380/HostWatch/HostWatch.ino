@@ -154,8 +154,7 @@ static bool readTest(const char *tag, int n) {
 void setup() {
     Serial.begin(115200);
     waitHost(30000);
-    logf("HIL380 watch start clk_sys=%lu tusb=%d.%d.%d
-", (unsigned long)clock_get_hz(clk_sys), TUSB_VERSION_MAJOR,
+    logf("HIL380 watch start clk_sys=%lu tusb=%d.%d.%d\n", (unsigned long)clock_get_hz(clk_sys), TUSB_VERSION_MAJOR,
          TUSB_VERSION_MINOR, TUSB_VERSION_REVISION);
 }
 
@@ -166,8 +165,7 @@ void loop() {
     flushEvents();
     int dp = rawPad(PIN_USB_HOST_DP), dm = rawPad(PIN_USB_HOST_DM);
     if (dp != lastDp || dm != lastDm) {
-        logf("LINE t=%lu raw dp=%d dm=%d
-", (unsigned long)millis(), dp, dm);
+        logf("LINE t=%lu raw dp=%d dm=%d\n", (unsigned long)millis(), dp, dm);
         lastDp = dp;
         lastDm = dm;
     }
@@ -179,8 +177,7 @@ void loop() {
     }
     if (millis() - lastBeat >= 30000) {
         lastBeat = millis();
-        logf("BEAT t=%lu fs_mounted=%d mounts=%lu spinlocks=%d
-", (unsigned long)millis(), (int)fsMounted,
+        logf("BEAT t=%lu fs_mounted=%d mounts=%lu spinlocks=%d\n", (unsigned long)millis(), (int)fsMounted,
              (unsigned long)mscMounts, claimedSpinLocks());
     }
     delay(20);
