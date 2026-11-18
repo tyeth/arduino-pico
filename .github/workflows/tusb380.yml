@@ -162,6 +162,7 @@ jobs:
             DBG="-DCFG_TUSB_DEBUG=2 -DCFG_TUD_LOG_LEVEL=3 -DCFG_TUSB_DEBUG_PRINTF=hil_tusb_printf -DSERIAL_TUSB_DEBUG=hilLog -include $GITHUB_WORKSPACE/$S/FeatherMscFixDbg/hil_log.h"
             build feather-tinyusb-FeatherMscFixDbg "$B:usbstack=tinyusb,freq=120" $S/FeatherMscFixDbg "$DBG"
             build feather-tinyusb-FeatherReenumAB "$B:usbstack=tinyusb,freq=120" $S/FeatherReenumAB "${DBG/FeatherMscFixDbg/FeatherReenumAB}"
+            build feather-tinyusb-FeatherReenumAB-nodebug "$B:usbstack=tinyusb,freq=120" $S/FeatherReenumAB
             build feather-tinyusb_host-host_device_info "$B:usbstack=tinyusb_host,freq=120" $L/Host/Simple/host_device_info
             ;;
         esac

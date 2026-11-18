@@ -8,6 +8,7 @@
 //            power-cycles the device, wait 15 s, force a reconnect.  Same as the sleep runs minus LowPower itself
 //            (no pin parking, clock changes or core1 idle): failing like them points at the device booting without
 //            SOF; clean points back at LowPower.
+#include "hil_log.h" // also force-included by the debug build; the non-debug build (no TinyUSB log) needs it here
 #include "pio_usb.h"
 #include "SdFat_Adafruit_Fork.h"
 #include <Adafruit_TinyUSB.h>
