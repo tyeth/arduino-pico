@@ -21,6 +21,10 @@ void pio_usb_force_reconnect(uint8_t root_idx) {
                 pio_usb_ll_transfer_complete(ep, PIO_USB_INTS_ENDPOINT_ERROR_BITS);
             }
         }
+        // Deliver the disconnect now.  Otherwise the next SOF frame's connect scan sees the (still attached) device,
+        // sets CONNECT in the same ints word, and pio_usb_host_irq_handler() reports attach *before* remove: TinyUSB
+        // ends up with the device removed and the root port marked connected, so it is never enumerated again.
+        pio_usb_host_irq_handler(root_idx);
     }
     restore_interrupts(s);
 }
