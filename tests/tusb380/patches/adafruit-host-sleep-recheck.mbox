@@ -1,7 +1,7 @@
-From de04d6060396a74d8ce0d65c152a1acdc7c856e8 Mon Sep 17 00:00:00 2001
+From f64a5905b43d151eead271b3b348f2faa84e0ce4 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
-Date: Thu, 19 Nov 2026 20:58:15 +0000
-Subject: [PATCH 1/5] tinyusb (interim copy): host: re-enumerate a device that
+Date: Thu, 19 Nov 2026 21:17:03 +0000
+Subject: [PATCH 1/6] tinyusb (interim copy): host: re-enumerate a device that
  STALLs SET_CONFIGURATION
 
 Vendored copy of the matching commit on the tinyusb branch host-sleep-recheck, so this
@@ -57,10 +57,10 @@ index b0282fb..d355344 100644
 2.55.0.windows.2
 
 
-From 20fd22cf6c70b9967ff487a94a1eff03eb9c50d7 Mon Sep 17 00:00:00 2001
+From 7ee903a5c0a9b47b6a78f30c9b03470a435256bb Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
-Date: Thu, 19 Nov 2026 20:58:16 +0000
-Subject: [PATCH 2/5] tinyusb (interim copy): host: add tuh_rhport_recheck() to
+Date: Thu, 19 Nov 2026 21:17:03 +0000
+Subject: [PATCH 2/6] tinyusb (interim copy): host: add tuh_rhport_recheck() to
  find a device replaced while the host slept
 
 Vendored copy of the matching commit on the tinyusb branch host-sleep-recheck, so this
@@ -81,7 +81,9 @@ tuh_rhport_recheck(rhport) queues a check in the usbh task: the device
 attached directly to the port is sent GET_DESCRIPTOR(Device). One that
 answers with the same VID/PID is left alone (one control transfer, no
 remount); otherwise an attach event is posted, so usbh removes the old
-device, resets the port and enumerates whatever is there. Devices behind a
+device, resets the port and enumerates whatever is there. A port with a
+device attached but nothing enumerated (an attach whose retries ran out,
+or one never seen) is enumerated again; an empty port is left alone. Devices behind a
 hub are covered by the hub's own port status change.
 
 Equivalent logic (the probe and hcd_event_device_attach() from the
@@ -93,12 +95,12 @@ been compiled (arm-none-eabi-gcc 14.3, -Wall -Wextra -Wconversion
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- src/host/usbh.c | 54 +++++++++++++++++++++++++++++++++++++++++++++++++
- src/host/usbh.h | 10 +++++++++
- 2 files changed, 64 insertions(+)
+ src/host/usbh.c | 60 +++++++++++++++++++++++++++++++++++++++++++++++++
+ src/host/usbh.h | 11 +++++++++
+ 2 files changed, 71 insertions(+)
 
 diff --git a/src/host/usbh.c b/src/host/usbh.c
-index d355344..79a8d94 100644
+index d355344..1b3fb8e 100644
 --- a/src/host/usbh.c
 +++ b/src/host/usbh.c
 @@ -242,6 +242,8 @@ static usbh_data_t _usbh_data;
@@ -110,7 +112,7 @@ index d355344..79a8d94 100644
  } usbh_epbuf_t;
  CFG_TUH_MEM_SECTION static usbh_epbuf_t _usbh_epbuf;
  
-@@ -993,6 +995,58 @@ bool tuh_task_stop(void) {
+@@ -993,6 +995,64 @@ bool tuh_task_stop(void) {
    return true;
  }
  
@@ -151,6 +153,12 @@ index d355344..79a8d94 100644
 +      return; // one device per root port; a hub reports what changed behind it through its own port status
 +    }
 +  }
++  // Nothing enumerated, yet something is attached: an attach that failed (its retries used up) or was never seen
++  // while the host slept. Enumerate it again; with the port empty this is a no-op.
++  if (hcd_port_connect_status(rhport)) {
++    TU_LOG_USBH("[%u] Re-check: unenumerated device on the port, enumerating\r\n", rhport);
++    hcd_event_device_attach(rhport, false);
++  }
 +}
 +
 +bool tuh_rhport_recheck(uint8_t rhport) {
@@ -170,10 +178,10 @@ index d355344..79a8d94 100644
  // Control transfer
  //--------------------------------------------------------------------+
 diff --git a/src/host/usbh.h b/src/host/usbh.h
-index 44a91a1..d974be5 100644
+index 44a91a1..f2aadef 100644
 --- a/src/host/usbh.h
 +++ b/src/host/usbh.h
-@@ -213,6 +213,16 @@ bool tuh_rhport_is_active(uint8_t rhport);
+@@ -213,6 +213,17 @@ bool tuh_rhport_is_active(uint8_t rhport);
  // Assert/de-assert Bus Reset signal to roothub port. USB specs: it should last 10-50ms
  bool tuh_rhport_reset_bus(uint8_t rhport, bool active);
  
@@ -181,7 +189,8 @@ index 44a91a1..d974be5 100644
 +// system sleep that stopped the host controller (no SOF, interrupts not serviced): a device unplugged and replugged,
 +// replaced or power-cycled meanwhile leaves no detach behind, so the stack keeps talking to an address nothing answers.
 +// The device is sent GET_DESCRIPTOR(Device); if it does not answer, or another VID/PID does, it is removed and the
-+// port enumerated again (tuh_umount_cb() then tuh_mount_cb()). An unchanged device sees one control transfer.
++// port enumerated again (tuh_umount_cb() then tuh_mount_cb()). An unchanged device sees one control transfer. A port
++// with a device attached but nothing enumerated (an attach that failed, or was missed) is enumerated again.
 +// Devices behind a hub are covered by the hub's own port status. The check runs in the usbh task; this only queues
 +// it, so call it from task context (not an ISR) on the core that runs tuh_task(). Returns false if rhport is not an
 +// active host port or the queue is full.
@@ -194,10 +203,89 @@ index 44a91a1..d974be5 100644
 2.55.0.windows.2
 
 
-From e7f6c2208e844a4271feb0309a7d7a251e37f151 Mon Sep 17 00:00:00 2001
+From d9d0b8b1e2af4c9b5c93169b4d056539a60cb61e Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 21:17:04 +0000
+Subject: [PATCH 3/6] tinyusb (interim copy): host: wait
+ CFG_TUH_ENUM_RETRY_DELAY_MS before re-enumerating a device that failed
+
+Vendored copy of the matching commit on the tinyusb branch host-sleep-recheck, so this
+branch builds and runs before the next TinyUSB sync. Drop it when src/ is synced from
+TinyUSB with that change in.
+
+enum_retry() and the root port retry of a failed attach both reset the
+device again after the 150 ms attach debounce. A device that fails right
+after a reset tends to fail again if reset straight away: a CircuitPython
+Feather ESP32-S2 that STALLed SET_CONFIGURATION did so eight times in a
+row, using CFG_TUH_ENUM_ATTEMPT_MAX x (1 + USBH_ENUM_ROOT_RETRY_MAX)
+attempts within about two seconds, and was left attached but unmounted.
+
+Wait CFG_TUH_ENUM_RETRY_DELAY_MS (default 1000 ms, configurable) before
+those retries instead. A first attach still uses the 150 ms debounce.
+
+Measured on the TinyUSB copy in Adafruit_TinyUSB_Arduino 3.8.0 with the
+SET_CONFIGURATION retry: 12 swaps of that device during a sleep each, 11
+mounted at the first re-detection with the 1 s delay (10 without), and
+none ended unmounted.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/host/usbh.c   | 8 ++++++--
+ src/tusb_option.h | 7 +++++++
+ 2 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/src/host/usbh.c b/src/host/usbh.c
+index 1b3fb8e..c25d0db 100644
+--- a/src/host/usbh.c
++++ b/src/host/usbh.c
+@@ -2045,7 +2045,11 @@ static void enum_new_device(hcd_event_t *event) {
+   dev0_bus->hub_addr       = event->connection.hub_addr;
+   dev0_bus->hub_port       = event->connection.hub_port;
+   _usbh_data.enum_attempt  = 0;
+-  usbh_defer_func_ms_async(ENUM_DEBOUNCING_DELAY_MS, enum_delay_async, ENUM_AFTER_DEBOUNCING_DELAY);
++  // a root port retry of a failed attach: give the device time to settle before resetting it again
++  const bool root_retry = (_usbh_data.root_retry_count > 0) && (_usbh_data.root_retry_rhport == dev0_bus->rhport) &&
++                          (dev0_bus->hub_addr == 0);
++  usbh_defer_func_ms_async(root_retry ? CFG_TUH_ENUM_RETRY_DELAY_MS : ENUM_DEBOUNCING_DELAY_MS, enum_delay_async,
++                           ENUM_AFTER_DEBOUNCING_DELAY);
+ }
+ 
+ // process device enumeration
+@@ -2570,7 +2574,7 @@ static bool enum_retry(void) {
+   _usbh_data.enum_attempt++;
+   TU_LOG_USBH("Enumeration failed, retry attempt %u/%u\r\n", _usbh_data.enum_attempt + 1, CFG_TUH_ENUM_ATTEMPT_MAX);
+   _usbh_data.enumerating_daddr = 0;
+-  usbh_defer_func_ms_async(ENUM_DEBOUNCING_DELAY_MS, enum_delay_async, ENUM_AFTER_DEBOUNCING_DELAY);
++  usbh_defer_func_ms_async(CFG_TUH_ENUM_RETRY_DELAY_MS, enum_delay_async, ENUM_AFTER_DEBOUNCING_DELAY);
+   return true;
+ #else
+   return false;
+diff --git a/src/tusb_option.h b/src/tusb_option.h
+index 732c25b..e333693 100644
+--- a/src/tusb_option.h
++++ b/src/tusb_option.h
+@@ -803,6 +803,13 @@
+     #define CFG_TUH_ENUM_ATTEMPT_MAX 2
+   #endif
+ 
++  // Wait before resetting a device again after a failed enumeration (the retry above, and the root port retry of a
++  // failed attach), instead of the 150 ms attach debounce: a device that fails right after a reset tends to fail
++  // again if reset straight away, and back-to-back retries can use the whole budget within that window.
++  #ifndef CFG_TUH_ENUM_RETRY_DELAY_MS
++    #define CFG_TUH_ENUM_RETRY_DELAY_MS 1000
++  #endif
++
+ #endif // CFG_TUH_ENABLED
+ 
+ // Attribute to place data in accessible RAM for host controller (default: CFG_TUSB_MEM_SECTION)
+-- 
+2.55.0.windows.2
+
+
+From 6f1f279be29e3fee5f8bd02e54c224931c4c19db Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 20:56:50 +0000
-Subject: [PATCH 3/5] USBH MSC block device: time out a command that never
+Subject: [PATCH 4/6] USBH MSC block device: time out a command that never
  completes, honour CSW status
 
 wait_for_io() only gave up when the device unmounted. A device that stops
@@ -294,10 +382,10 @@ index d731495..3d50aeb 100644
 2.55.0.windows.2
 
 
-From 53fd2641f955954a1db253771c9408a4558a2a21 Mon Sep 17 00:00:00 2001
+From 9c9f6710778052ff0acd21b0e3b71a35428dc07b Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 20:57:13 +0000
-Subject: [PATCH 4/5] USBH: add Adafruit_USBH_Host::recheck() for after a sleep
+Subject: [PATCH 5/6] USBH: add Adafruit_USBH_Host::recheck() for after a sleep
 
 Thin wrapper over tuh_rhport_recheck() on the port passed to begin(): call
 it after waking from a sleep that stopped the host (arduino-pico LowPower
@@ -347,10 +435,10 @@ index 8daa8a7..75b2e26 100644
 2.55.0.windows.2
 
 
-From c874ff36bdaccf0c541bd9145947009cf6ace78f Mon Sep 17 00:00:00 2001
+From 3fb307f28594ffdb224bbb0d471be87f1e5096d9 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 20:58:09 +0000
-Subject: [PATCH 5/5] examples: DualRole msc_file_explorer_sleep, a host that
+Subject: [PATCH 6/6] examples: DualRole msc_file_explorer_sleep, a host that
  sleeps and rechecks its drive
 
 RP2040 (arduino-pico LowPower, Pico-PIO-USB host on core1): lists the

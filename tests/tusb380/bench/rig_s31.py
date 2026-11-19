@@ -18,12 +18,19 @@ FEATHER = "1-1.4.4"
 WSL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wsl")
 
 
-def api(method, path, body=None, raw=None, timeout=30):
+def api(method, path, body=None, raw=None, timeout=30, tries=5):
     data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
     hdr = {"Content-Type": "application/octet-stream" if raw is not None else "application/json"}
-    req = urllib.request.Request(BRIDGE + path, data=data, headers=hdr, method=method)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.load(r)
+    for attempt in range(tries):
+        req = urllib.request.Request(BRIDGE + path, data=data, headers=hdr, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.load(r)
+        except (OSError, ValueError) as e:  # URLError, timeouts, a half-read body
+            if attempt == tries - 1:
+                raise
+            print(f"bridge {method} {path.split('?')[0]}: {e}; retrying", flush=True)
+            time.sleep(2)
 
 
 def jl(code, wait=1.5):
