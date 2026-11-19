@@ -1,7 +1,7 @@
 """HIL rig on the S31 bridge (192.168.1.102): Feather RP2040 USB Host at 1-1.4.4 (flashed and logged through the
 bridge HTTP API), Jumperless V5 imported into WSL over USB/IP (S2 EN = row 30, switched to GND via jl_wsl.py).
 
-usage: python rig_s31.py <uf2> <log.txt> [max_s=1500] [pre_s=1] [swap_off_s=2]
+usage: python rig_s31.py <uf2> <log.txt> [max_s=1500] [pre_s=1] [swap_off_s=2] [trigger="ENTER "] [swap_every=1]
   - flashes the UF2 (bridge enters the UF2 bootloader itself), power-cycles the S2 for 5 s for a clean start,
   - follows the Feather's serial, and on every "ENTER " line waits pre_s then power-cycles the S2 (swap_off_s off),
   - stops 2 s after a line containing "fix DONE" (or after max_s).
@@ -79,6 +79,9 @@ def main():
     max_s = float(sys.argv[3]) if len(sys.argv) > 3 else 1500
     pre_s = float(sys.argv[4]) if len(sys.argv) > 4 else 1
     off_s = float(sys.argv[5]) if len(sys.argv) > 5 else 2
+    trigger = sys.argv[6] if len(sys.argv) > 6 else "ENTER "
+    every = int(sys.argv[7]) if len(sys.argv) > 7 else 1
+    seen = 0
     j = flash(uf2)
     print("flash:", j.get("state"), j.get("result") or j.get("error") or "", flush=True)
     print("feather back:", wait_feather(), flush=True)
@@ -97,7 +100,7 @@ def main():
                 if not l.strip():
                     continue
                 log.write(f"{time.time() - t0:8.3f} {l}\n"); log.flush()
-                if "ENTER " in l:
+                if trigger in l and (seen := seen + 1) % every == 0:
                     time.sleep(pre_s)
                     r = en_cycle(off_s)
                     log.write(f"{time.time() - t0:8.3f} [rig] swapped S2: {r}\n"); log.flush()

@@ -2,9 +2,9 @@
 // Adafruit_TinyUSB_Arduino branch host-sleep-recheck (tests/tusb380/patches/adafruit-host-sleep-recheck.mbox).
 // Feather RP2040 USB Host, usbstack=tinyusb, freq=120; the TinyUSB host log goes through hil_log.h like FeatherMscFixDbg.
 //
-// After every wake core1 calls USBHost.recheck(). The outcome is read from the mount callbacks: an unmount within
-// 3 s means the library re-enumerated the port ("reenumerate"), none means it kept the device ("same"); the debug
-// log also carries the library's own "Re-check:" lines.
+// After every wake core1 calls USBHost.recheck() and waits for USBHost.recheckBusy() to clear (the check, and any
+// re-enumeration it started, complete). An unmount meanwhile means the library re-enumerated the port
+// ("reenumerate"), none means it kept the device ("same"); the debug log also has the library's "Re-check:" lines.
 //
 // Schedule: S = the bench power-cycles the USB-A device (CircuitPython Feather ESP32-S2, EN via Jumperless) during
 // the 15 s light sleep ("ENTER" line); N = the device is left alone ("NOSWAP" line).
@@ -85,6 +85,8 @@ extern "C" {
 //--------------------------------------------------------------------+
 static volatile bool recheckReq = false;
 static volatile bool recheckQueued = false;
+static volatile bool recheckDone = false;
+static bool recheckRunning = false;
 
 void setup1() {
     pinMode(PIN_5V_EN, OUTPUT);
@@ -99,8 +101,13 @@ void loop1() {
     if (recheckReq) {
         recheckQueued = USBHost.recheck();
         recheckReq = false;
+        recheckRunning = true;
     }
     USBHost.task();
+    if (recheckRunning && !USBHost.recheckBusy()) {
+        recheckRunning = false;
+        recheckDone = true;
+    }
 }
 
 //--------------------------------------------------------------------+
@@ -202,26 +209,19 @@ void loop() {
     uint32_t tw = millis();
 
     recheckQueued = false;
+    recheckDone = false;
     recheckReq = true;
-    while (recheckReq && millis() - tw < 1000) {
-        idle(1);
-    }
-    // an unmount within 3 s = the library found the device gone or replaced and is re-enumerating the port
-    while (devUnmounts == umBefore && millis() - tw < 3000) {
+    // the library says when the check, and any re-enumeration it started, is complete
+    while (!recheckDone && millis() - tw < 30000) {
         idle(5);
     }
+    bool done = recheckDone;
     bool reenum = devUnmounts != umBefore;
     uint32_t tCheck = millis() - tw;
-    bool remounted = false;
-    if (reenum || !fsMounted) {
-        while (!(fsMounted && mscMounts != mscBefore && devMounts != devBefore) && millis() - tw < 20000) {
-            idle(10);
-        }
-        remounted = fsMounted && mscMounts != mscBefore && devMounts != devBefore;
-    }
+    bool remounted = fsMounted && mscMounts != mscBefore && devMounts != devBefore;
     bool ok = readTest("POST", n);
-    plog("RESULT %u mode=%c wake=%s queued=%d check=%lums remounted=%d total=%lums read=%d\n", n, m,
-         reenum ? "reenumerate" : "same", (int)recheckQueued, (unsigned long)tCheck, (int)remounted,
+    plog("RESULT %u mode=%c wake=%s queued=%d done=%d check=%lums remounted=%d total=%lums read=%d\n", n, m,
+         reenum ? "reenumerate" : "same", (int)recheckQueued, (int)done, (unsigned long)tCheck, (int)remounted,
          (unsigned long)(millis() - tw), (int)ok);
     idle(500);
     n++;

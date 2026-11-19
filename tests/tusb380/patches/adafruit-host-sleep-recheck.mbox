@@ -1,8 +1,8 @@
 From f64a5905b43d151eead271b3b348f2faa84e0ce4 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 21:17:03 +0000
-Subject: [PATCH 1/6] tinyusb (interim copy): host: re-enumerate a device that
- STALLs SET_CONFIGURATION
+Subject: [PATCH 01/13] tinyusb (interim copy): host: re-enumerate a device
+ that STALLs SET_CONFIGURATION
 
 Vendored copy of the matching commit on the tinyusb branch host-sleep-recheck, so this
 branch builds and runs before the next TinyUSB sync. Drop it when src/ is synced from
@@ -60,8 +60,8 @@ index b0282fb..d355344 100644
 From 7ee903a5c0a9b47b6a78f30c9b03470a435256bb Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 21:17:03 +0000
-Subject: [PATCH 2/6] tinyusb (interim copy): host: add tuh_rhport_recheck() to
- find a device replaced while the host slept
+Subject: [PATCH 02/13] tinyusb (interim copy): host: add tuh_rhport_recheck()
+ to find a device replaced while the host slept
 
 Vendored copy of the matching commit on the tinyusb branch host-sleep-recheck, so this
 branch builds and runs before the next TinyUSB sync. Drop it when src/ is synced from
@@ -206,7 +206,7 @@ index 44a91a1..f2aadef 100644
 From d9d0b8b1e2af4c9b5c93169b4d056539a60cb61e Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 21:17:04 +0000
-Subject: [PATCH 3/6] tinyusb (interim copy): host: wait
+Subject: [PATCH 03/13] tinyusb (interim copy): host: wait
  CFG_TUH_ENUM_RETRY_DELAY_MS before re-enumerating a device that failed
 
 Vendored copy of the matching commit on the tinyusb branch host-sleep-recheck, so this
@@ -285,7 +285,7 @@ index 732c25b..e333693 100644
 From 6f1f279be29e3fee5f8bd02e54c224931c4c19db Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 20:56:50 +0000
-Subject: [PATCH 4/6] USBH MSC block device: time out a command that never
+Subject: [PATCH 04/13] USBH MSC block device: time out a command that never
  completes, honour CSW status
 
 wait_for_io() only gave up when the device unmounted. A device that stops
@@ -385,7 +385,8 @@ index d731495..3d50aeb 100644
 From 9c9f6710778052ff0acd21b0e3b71a35428dc07b Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 20:57:13 +0000
-Subject: [PATCH 5/6] USBH: add Adafruit_USBH_Host::recheck() for after a sleep
+Subject: [PATCH 05/13] USBH: add Adafruit_USBH_Host::recheck() for after a
+ sleep
 
 Thin wrapper over tuh_rhport_recheck() on the port passed to begin(): call
 it after waking from a sleep that stopped the host (arduino-pico LowPower
@@ -438,7 +439,7 @@ index 8daa8a7..75b2e26 100644
 From 3fb307f28594ffdb224bbb0d471be87f1e5096d9 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 20:58:09 +0000
-Subject: [PATCH 6/6] examples: DualRole msc_file_explorer_sleep, a host that
+Subject: [PATCH 06/13] examples: DualRole msc_file_explorer_sleep, a host that
  sleeps and rechecks its drive
 
 RP2040 (arduino-pico LowPower, Pico-PIO-USB host on core1): lists the
@@ -697,6 +698,869 @@ index 0000000..29c1a6a
 +#endif
 +
 +#endif
+-- 
+2.55.0.windows.2
+
+
+From 538a3ab2999276343766f5c359b807f190e6fc97 Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 22:21:39 +0000
+Subject: [PATCH 07/13] examples: build msc_file_explorer_sleep on
+ feather_rp2040_tinyusb
+
+The CI build matrix has feather_rp2040_tinyusb, not pico_rp2040_tinyusb, so
+the example was built on no board (the agent contract test
+test_example_eligible_on_no_board_is_uncovered caught it).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ ...rp2040_tinyusb.test.only => .feather_rp2040_tinyusb.test.only} | 0
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ rename examples/DualRole/MassStorage/msc_file_explorer_sleep/{.pico_rp2040_tinyusb.test.only => .feather_rp2040_tinyusb.test.only} (100%)
+
+diff --git a/examples/DualRole/MassStorage/msc_file_explorer_sleep/.pico_rp2040_tinyusb.test.only b/examples/DualRole/MassStorage/msc_file_explorer_sleep/.feather_rp2040_tinyusb.test.only
+similarity index 100%
+rename from examples/DualRole/MassStorage/msc_file_explorer_sleep/.pico_rp2040_tinyusb.test.only
+rename to examples/DualRole/MassStorage/msc_file_explorer_sleep/.feather_rp2040_tinyusb.test.only
+-- 
+2.55.0.windows.2
+
+
+From 16254fcfcde7f382b45cc6f78f312fcf3ce6c5eb Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 22:41:18 +0000
+Subject: [PATCH 08/13] tinyusb (interim copy): host: tuh_rhport_recheck():
+ never block, retry a refused probe, add tuh_rhport_recheck_busy()
+
+Vendored copy of the matching commit on the tinyusb branch host-sleep-recheck, so this
+branch builds and runs before the next TinyUSB sync. Drop it when src/ is synced from
+TinyUSB with that change in.
+
+Review fixes for tuh_rhport_recheck():
+- It posted a FUNC_CALL with a blocking queue send. On FreeRTOS/Zephyr that
+  waits forever on a full queue, and the documented caller is the task
+  that drains it. It now only sets a state; tuh_task() does the check.
+  A call from another task wakes the host task the way tuh_control_xfer()
+  does (usbh_defer_func() only when not on the host task).
+- A refused probe (control queue full) was taken as a missing device and
+  re-enumerated a healthy one. The probe is now sent only with the control
+  slot free, so a refusal means the device cannot be reached.
+- A check asked for during an enumeration was dropped. It now waits.
+- The probe's completion callback also runs from device close and
+  tuh_deinit(); it now only records a verdict, and the task loop does the
+  re-enumeration (the ATTACH handling run from the task, not queued). It
+  checks the device's generation, so a reused address is not mistaken for
+  the probed device.
+- tuh_deinit() ends a check in progress.
+
+New tuh_rhport_recheck_busy(): true until the check is complete, including
+any re-enumeration it started, so an application knows when the device is
+settled. A check asked for while one runs follows it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/host/usbh.c | 173 ++++++++++++++++++++++++++++++++++++++----------
+ src/host/usbh.h |  12 +++-
+ 2 files changed, 146 insertions(+), 39 deletions(-)
+
+diff --git a/src/host/usbh.c b/src/host/usbh.c
+index c25d0db..8e6c5fb 100644
+--- a/src/host/usbh.c
++++ b/src/host/usbh.c
+@@ -230,6 +230,11 @@ typedef struct {
+   usbh_call_after_t call_after;
+   // Per-daddr generation counter — bumped on usbh_device_close() to identify stale pending control transfer
+   uint8_t daddr_gen[TOTAL_DEVICES + 1];
++  // tuh_rhport_recheck(): one check at a time, on the active controller
++  uint8_t recheck_state;        // RECHECK_*
++  uint8_t recheck_again;        // another check was asked for while this one ran
++  uint8_t recheck_daddr;        // the root device being probed
++  uint8_t recheck_gen;          // its daddr_gen when the probe was sent
+ #if CFG_TUSB_OS_HAS_SCHEDULER
+   osal_task_handle_t task_hdl;  // host task handle, lazy-captured on first tuh_task_ext()
+ #endif
+@@ -239,6 +244,30 @@ typedef struct {
+ static uint8_t _usbh_controller_id = TUSB_INDEX_INVALID_8;
+ static usbh_data_t _usbh_data;
+ 
++// tuh_rhport_recheck() states. The probe's completion callback only records a verdict; the task loop acts on it in
++// recheck_process(), because that callback also runs from device close and tuh_deinit(), where re-enumerating would
++// re-enter the teardown.
++enum {
++  RECHECK_IDLE = 0,
++  RECHECK_PENDING,    // asked for, waiting for the bus (no enumeration, control slot free)
++  RECHECK_PROBING,    // GET_DESCRIPTOR(Device) sent to the root device
++  RECHECK_REENUM_REQ, // the device is gone, replaced, or attached but not enumerated: re-enumerate the port
++  RECHECK_REENUM,     // re-enumerating; done when no enumeration and no root port retry is left
++};
++
++// tuh_rhport_recheck() has work the task can do now
++static bool recheck_due(void) {
++  switch (_usbh_data.recheck_state) {
++    case RECHECK_PENDING:
++    case RECHECK_REENUM_REQ:
++      return _usbh_data.enumerating_daddr == TUSB_INDEX_INVALID_8;
++    case RECHECK_REENUM:
++      return _usbh_data.enumerating_daddr == TUSB_INDEX_INVALID_8 && _usbh_data.root_retry_count == 0;
++    default:
++      return false;
++  }
++}
++
+ typedef struct {
+   TUH_EPBUF_TYPE_DEF(tusb_control_request_t, request);
+   TUH_EPBUF_DEF(ctrl, CFG_TUH_ENUMERATION_BUFSIZE);
+@@ -371,6 +400,7 @@ TU_ATTR_ALWAYS_INLINE static inline usbh_class_driver_t const *get_driver(uint8_
+ //--------------------------------------------------------------------+
+ static void enum_new_device(hcd_event_t* event);
+ static void enum_delay_async(uintptr_t state);
++static void recheck_process(void);
+ static void process_remove_event(hcd_event_t *event);
+ static void remove_device_tree(uint8_t rhport, uint8_t hub_addr, uint8_t hub_port);
+ 
+@@ -648,6 +678,10 @@ bool tuh_deinit(uint8_t rhport) {
+   // remove all devices on this rhport (hub_addr = 0, hub_port = 0)
+   remove_device_tree(rhport, 0, 0);
+ 
++  // a re-check in progress ends with the controller
++  _usbh_data.recheck_state = RECHECK_IDLE;
++  _usbh_data.recheck_again = 0;
++
+   // deinit host stack if no controller is active
+   if (!tuh_inited()) {
+     // Class drivers
+@@ -723,6 +757,10 @@ bool tuh_task_event_ready(void) {
+     return true;
+   }
+ 
++  if (recheck_due()) {
++    return true;
++  }
++
+   // in-flight control transfer watchdog expired
+   if (_usbh_data.ctrl_xfer_info.stage != CONTROL_STAGE_IDLE &&
+       deadline_passed(_usbh_data.ctrl_xfer_info.timeout_at_ms)) {
+@@ -890,6 +928,11 @@ static bool usbh_task_run(uint32_t timeout_ms, bool in_isr, bool stoppable) {
+     }
+   #endif
+ 
++    // tuh_rhport_recheck(), only from tuh_task(): not from the nested polls of a synchronous control transfer
++    if (stoppable) {
++      recheck_process();
++    }
++
+     // Process call_after_ms function if ms is reached
+     tusb_defer_func_t after_cb = _usbh_data.call_after.func;
+     if (after_cb) {
+@@ -998,61 +1041,119 @@ bool tuh_task_stop(void) {
+ //--------------------------------------------------------------------+
+ // Root port re-check (after a system sleep)
+ //--------------------------------------------------------------------+
+-static void recheck_root_complete(tuh_xfer_t *xfer) {
+-  const uint8_t rhport = (uint8_t) xfer->user_data;
+-  const usbh_device_t *dev = get_device(xfer->daddr);
+-  const tusb_desc_device_t *desc = (const tusb_desc_device_t *) _usbh_epbuf.recheck;
++// End a check, or start the one asked for while it ran
++static void recheck_finish(void) {
++  (void) osal_mutex_lock(_usbh_mutex, OSAL_TIMEOUT_WAIT_FOREVER);
++  _usbh_data.recheck_state = _usbh_data.recheck_again ? RECHECK_PENDING : RECHECK_IDLE;
++  _usbh_data.recheck_again = 0;
++  (void) osal_mutex_unlock(_usbh_mutex);
++}
+ 
+-  if (dev == NULL || !dev->connected) {
+-    return; // detached meanwhile: its removal is already handled
++// Only records the verdict, see the RECHECK_* states
++static void recheck_root_complete(tuh_xfer_t *xfer) {
++  const uint8_t daddr = xfer->daddr;
++  if (_usbh_data.recheck_state != RECHECK_PROBING || daddr != _usbh_data.recheck_daddr) {
++    return;
+   }
++  const usbh_device_t *dev = get_device(daddr);
++  if (dev == NULL || !tuh_connected(daddr) || _usbh_data.daddr_gen[daddr] != _usbh_data.recheck_gen) {
++    recheck_finish(); // closed meanwhile: its removal, and any new attach, are handled already
++    return;
++  }
++  const tusb_desc_device_t *desc = (const tusb_desc_device_t *) _usbh_epbuf.recheck;
+   if (xfer->result == XFER_RESULT_SUCCESS && xfer->actual_len == sizeof(tusb_desc_device_t) &&
+       desc->idVendor == dev->desc_device.idVendor && desc->idProduct == dev->desc_device.idProduct) {
+-    TU_LOG_USBH("[%u:%u] Re-check: same device\r\n", rhport, xfer->daddr);
++    TU_LOG_USBH("[%u:%u] Re-check: same device\r\n", dev->bus_info.rhport, daddr);
++    recheck_finish();
+     return;
+   }
+-  // No answer at its address (a new or reset device waits at address 0), or another device answered: what was
+-  // mounted is gone. An attach event removes it, resets the port and enumerates what is there now.
+-  TU_LOG_USBH("[%u:%u] Re-check: device gone or replaced, re-enumerating\r\n", rhport, xfer->daddr);
+-  hcd_event_device_attach(rhport, false);
++  // No answer at its address (a new or reset device waits at address 0), or another device answered
++  TU_LOG_USBH("[%u:%u] Re-check: device gone or replaced\r\n", dev->bus_info.rhport, daddr);
++  _usbh_data.recheck_state = RECHECK_REENUM_REQ;
+ }
+ 
+-static void recheck_root_call(void *param) {
+-  const uint8_t rhport = (uint8_t) (uintptr_t) param;
+-  if (_usbh_data.enumerating_daddr != TUSB_INDEX_INVALID_8) {
+-    return; // an enumeration is talking to the bus already
++// The task loop's part of tuh_rhport_recheck(), see the RECHECK_* states
++static void recheck_process(void) {
++  if (!recheck_due()) {
++    return;
+   }
+-  for (uint8_t daddr = 1; daddr <= TOTAL_DEVICES; daddr++) {
+-    const usbh_device_t *dev = get_device(daddr);
+-    if (dev->connected && dev->bus_info.rhport == rhport && dev->bus_info.hub_addr == 0) {
+-      if (!tuh_descriptor_get_device(daddr, _usbh_epbuf.recheck, sizeof(tusb_desc_device_t), recheck_root_complete,
+-                                     rhport)) {
+-        hcd_event_device_attach(rhport, false);
++  const uint8_t rhport = _usbh_controller_id;
++
++  switch (_usbh_data.recheck_state) {
++    case RECHECK_PENDING:
++      // Probe only with the control slot free, so a refused send means the device cannot be reached
++      if (_usbh_data.ctrl_xfer_info.stage != CONTROL_STAGE_IDLE || !tu_fifo_empty(&_usbh_pending_ctrl_q)) {
++        return;
+       }
+-      return; // one device per root port; a hub reports what changed behind it through its own port status
++      for (uint8_t daddr = 1; daddr <= TOTAL_DEVICES; daddr++) {
++        const usbh_device_t *dev = get_device(daddr);
++        if (tuh_connected(daddr) && dev->bus_info.rhport == rhport && dev->bus_info.hub_addr == 0) {
++          _usbh_data.recheck_daddr = daddr;
++          _usbh_data.recheck_gen   = _usbh_data.daddr_gen[daddr];
++          _usbh_data.recheck_state = RECHECK_PROBING;
++          if (!tuh_descriptor_get_device(daddr, _usbh_epbuf.recheck, sizeof(tusb_desc_device_t), recheck_root_complete,
++                                         0)) {
++            _usbh_data.recheck_state = RECHECK_REENUM_REQ;
++          }
++          return; // one device per root port; a hub reports what changed behind it through its own port status
++        }
++      }
++      // Nothing enumerated: something attached is an attach whose retries ran out, or one missed while the host slept
++      if (hcd_port_connect_status(rhport)) {
++        TU_LOG_USBH("[%u] Re-check: device attached but not enumerated\r\n", rhport);
++        _usbh_data.recheck_state = RECHECK_REENUM_REQ;
++      } else {
++        recheck_finish();
++      }
++      break;
++
++    case RECHECK_REENUM_REQ: {
++      // What the HCD's attach event does, run from the task instead of queued (a queue send can block): remove what
++      // is on the port, reset it and enumerate. The debounce bit drops the HCD's own attach events meanwhile.
++      TU_LOG_USBH("[%u] Re-check: re-enumerating\r\n", rhport);
++      _usbh_data.recheck_state = RECHECK_REENUM;
++      _usbh_data.attach_debouncing_bm |= TU_BIT(rhport);
++      hcd_event_t event = {0};
++      event.rhport              = rhport;
++      event.event_id            = HCD_EVENT_DEVICE_ATTACH;
++      event.connection.hub_addr = 0;
++      event.connection.hub_port = 0;
++      (void) usbh_process_event(&event, false);
++      break;
+     }
+-  }
+-  // Nothing enumerated, yet something is attached: an attach that failed (its retries used up) or was never seen
+-  // while the host slept. Enumerate it again; with the port empty this is a no-op.
+-  if (hcd_port_connect_status(rhport)) {
+-    TU_LOG_USBH("[%u] Re-check: unenumerated device on the port, enumerating\r\n", rhport);
+-    hcd_event_device_attach(rhport, false);
++
++    case RECHECK_REENUM:
++      recheck_finish(); // that enumeration has ended: mounted, given up, or nothing attached
++      break;
++
++    default:
++      break;
+   }
+ }
+ 
+ bool tuh_rhport_recheck(uint8_t rhport) {
+   TU_VERIFY(tuh_rhport_is_active(rhport));
+-  // Queued for the usbh task like tuh_task_stop(): the check sends a control transfer and may post an attach
+-  hcd_event_t event = { 0 };
+-  event.rhport          = rhport;
+-  event.event_id        = USBH_EVENT_FUNC_CALL;
+-  event.func_call.func  = recheck_root_call;
+-  event.func_call.param = (void *) (uintptr_t) rhport;
+-  TU_VERIFY(osal_queue_send(_usbh_q, &event, false));
+-  tuh_event_hook_cb(event.rhport, event.event_id, false);
++  (void) osal_mutex_lock(_usbh_mutex, OSAL_TIMEOUT_WAIT_FOREVER);
++  if (_usbh_data.recheck_state == RECHECK_IDLE) {
++    _usbh_data.recheck_state = RECHECK_PENDING;
++  } else {
++    _usbh_data.recheck_again = 1;
++  }
++  (void) osal_mutex_unlock(_usbh_mutex);
++
++#if CFG_TUSB_OS_HAS_SCHEDULER
++  // Wake a host task waiting for an event. Never from the host task itself: it must not block on its own queue.
++  if (osal_task_get_current_handle() != _usbh_data.task_hdl) {
++    usbh_defer_func(NULL, NULL, false);
++  }
++#endif
+   return true;
+ }
+ 
++bool tuh_rhport_recheck_busy(uint8_t rhport) {
++  return tuh_rhport_is_active(rhport) && _usbh_data.recheck_state != RECHECK_IDLE;
++}
++
+ //--------------------------------------------------------------------+
+ // Control transfer
+ //--------------------------------------------------------------------+
+diff --git a/src/host/usbh.h b/src/host/usbh.h
+index f2aadef..24aecef 100644
+--- a/src/host/usbh.h
++++ b/src/host/usbh.h
+@@ -219,11 +219,17 @@ bool tuh_rhport_reset_bus(uint8_t rhport, bool active);
+ // The device is sent GET_DESCRIPTOR(Device); if it does not answer, or another VID/PID does, it is removed and the
+ // port enumerated again (tuh_umount_cb() then tuh_mount_cb()). An unchanged device sees one control transfer. A port
+ // with a device attached but nothing enumerated (an attach that failed, or was missed) is enumerated again.
+-// Devices behind a hub are covered by the hub's own port status. The check runs in the usbh task; this only queues
+-// it, so call it from task context (not an ISR) on the core that runs tuh_task(). Returns false if rhport is not an
+-// active host port or the queue is full.
++// Devices behind a hub are covered by the hub's own port status.
++// This only marks the check as wanted and never blocks; tuh_task() does it once no enumeration is running and the
++// control endpoint is free. Asked for again while a check runs, another check follows it. With an RTOS, a call from
++// another task wakes the host task. Call it from task context, not an ISR; without an RTOS, on the core that runs
++// tuh_task(). Returns false if rhport is not an active host port.
+ bool tuh_rhport_recheck(uint8_t rhport);
+ 
++// True from tuh_rhport_recheck() until its check is complete, including any re-enumeration it started (mounted,
++// given up after its retries, or nothing attached). The probe can take up to CFG_TUH_CONTROL_TIMEOUT_MS.
++bool tuh_rhport_recheck_busy(uint8_t rhport);
++
+ //--------------------------------------------------------------------+
+ // Device API
+ //--------------------------------------------------------------------+
+-- 
+2.55.0.windows.2
+
+
+From dfd914a4698881e6f32c1ae5ccd981602ec1099a Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 22:42:08 +0000
+Subject: [PATCH 09/13] USBH MSC block device: abort a timed-out command before
+ returning
+
+Review fix: wait_for_io() returned on timeout while TinyUSB still owned the
+caller's buffer, so a late transfer could write into memory SdFat had
+reused, and a late complete_cb could clear _busy under the next command.
+
+Add tuh_msc_abort() to the MSC host driver (an Adafruit addition, the
+vendored driver has no way to stop a command mid-way): it aborts both bulk
+endpoints, so the HCD stops writing to the buffer, and returns the
+interface to idle with complete_cb and buffer cleared, so a completion
+still queued is ignored. wait_for_io() calls it on timeout.
+
+The device is left mid-command (no Bulk-Only Reset Recovery here), so it
+may need re-enumerating before it works again.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/arduino/msc/Adafruit_USBH_MSC.cpp |  4 +++-
+ src/arduino/msc/Adafruit_USBH_MSC.h   |  5 ++++-
+ src/class/msc/msc_host.c              | 14 ++++++++++++++
+ src/class/msc/msc_host.h              |  6 ++++++
+ 4 files changed, 27 insertions(+), 2 deletions(-)
+
+diff --git a/src/arduino/msc/Adafruit_USBH_MSC.cpp b/src/arduino/msc/Adafruit_USBH_MSC.cpp
+index 37388c7..02e7302 100644
+--- a/src/arduino/msc/Adafruit_USBH_MSC.cpp
++++ b/src/arduino/msc/Adafruit_USBH_MSC.cpp
+@@ -75,8 +75,10 @@ bool Adafruit_USBH_MSC_BlockDevice::wait_for_io(void) {
+       return false;
+     }
+     // A device that stops answering without a detach the host can see (e.g.
+-    // swapped while the host was asleep) may never complete the command
++    // swapped while the host was asleep) may never complete the command.
++    // Abort it first: the caller's buffer must not be written after we return.
+     if (tusb_time_millis_api() - start_ms >= ADAFRUIT_USBH_MSC_IO_TIMEOUT_MS) {
++      tuh_msc_abort(_daddr);
+       _busy = false;
+       return false;
+     }
+diff --git a/src/arduino/msc/Adafruit_USBH_MSC.h b/src/arduino/msc/Adafruit_USBH_MSC.h
+index 3d50aeb..312450f 100644
+--- a/src/arduino/msc/Adafruit_USBH_MSC.h
++++ b/src/arduino/msc/Adafruit_USBH_MSC.h
+@@ -33,7 +33,10 @@
+ #include "SdFat_Adafruit_Fork.h"
+ 
+ // Longest a sector read/write waits for its SCSI command to complete before it
+-// fails (e.g. a device that stopped answering without detaching)
++// fails (e.g. a device that stopped answering without detaching). The command
++// is then aborted (tuh_msc_abort()), so the buffer is free again; the drive may
++// need re-enumerating (unplug, or USBHost.recheck() if it was swapped) before
++// it works again.
+ #ifndef ADAFRUIT_USBH_MSC_IO_TIMEOUT_MS
+ #define ADAFRUIT_USBH_MSC_IO_TIMEOUT_MS 3000
+ #endif
+diff --git a/src/class/msc/msc_host.c b/src/class/msc/msc_host.c
+index 78ecadc..b40e813 100644
+--- a/src/class/msc/msc_host.c
++++ b/src/class/msc/msc_host.c
+@@ -132,6 +132,20 @@ bool tuh_msc_ready(uint8_t dev_addr) {
+   return !epin_busy && !epout_busy;
+ }
+ 
++// Adafruit addition, not in TinyUSB: see msc_host.h
++bool tuh_msc_abort(uint8_t dev_addr) {
++  msch_interface_t* p_msc = get_itf(dev_addr);
++  TU_VERIFY(p_msc->configured);
++  // The HCD stops the transfers, so nothing more is written to the command's buffer
++  (void) tuh_edpt_abort_xfer(dev_addr, p_msc->ep_in);
++  (void) tuh_edpt_abort_xfer(dev_addr, p_msc->ep_out);
++  // A completion already queued for the command reaches msch_xfer_cb() in MSC_STAGE_IDLE, which ignores it
++  p_msc->stage       = MSC_STAGE_IDLE;
++  p_msc->complete_cb = NULL;
++  p_msc->buffer      = NULL;
++  return true;
++}
++
+ //--------------------------------------------------------------------+
+ // PUBLIC API: SCSI COMMAND
+ //--------------------------------------------------------------------+
+diff --git a/src/class/msc/msc_host.h b/src/class/msc/msc_host.h
+index 2cbbf1e..102fa6f 100644
+--- a/src/class/msc/msc_host.h
++++ b/src/class/msc/msc_host.h
+@@ -42,6 +42,12 @@ bool tuh_msc_mounted(uint8_t dev_addr);
+ // Check if the interface is currently ready or busy transferring data
+ bool tuh_msc_ready(uint8_t dev_addr);
+ 
++// Adafruit addition, not in TinyUSB: give up on the command in progress, e.g. after a timeout. Its transfers are
++// aborted and its complete_cb is never called, so the caller can reuse the command's buffer at once. The device is
++// left mid-command (Bulk-Only Transport needs Reset Recovery, which this driver does not do): later commands may fail
++// until the device is re-enumerated.
++bool tuh_msc_abort(uint8_t dev_addr);
++
+ // Get the LUN count the device reported, clamped to CFG_TUH_MSC_MAXLUN
+ uint8_t tuh_msc_get_maxlun(uint8_t dev_addr);
+ 
+-- 
+2.55.0.windows.2
+
+
+From 50405d1ffd7ae887b8e5166ffd7033d89c635c25 Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 22:42:56 +0000
+Subject: [PATCH 10/13] USBH: add recheckBusy(), build recheck() on ESP32 too
+
+Review fixes:
+- ESP32 cores build their own TinyUSB, whose headers come first and have
+  no tuh_rhport_recheck(), so recheck() failed to compile there even when
+  unused. recheck() and recheckBusy() return false on ARDUINO_ARCH_ESP32.
+- recheckBusy() wraps tuh_rhport_recheck_busy(): true until the check, and
+  any re-enumeration it started, is complete, so a sketch knows when the
+  device can be used again.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/arduino/Adafruit_USBH_Host.cpp | 10 ++++++++++
+ src/arduino/Adafruit_USBH_Host.h   | 10 +++++++++-
+ 2 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/src/arduino/Adafruit_USBH_Host.cpp b/src/arduino/Adafruit_USBH_Host.cpp
+index 4b4879d..f755869 100644
+--- a/src/arduino/Adafruit_USBH_Host.cpp
++++ b/src/arduino/Adafruit_USBH_Host.cpp
+@@ -148,7 +148,17 @@ void Adafruit_USBH_Host::task(uint32_t timeout_ms, bool in_isr) {
+   tuh_task_ext(timeout_ms, in_isr);
+ }
+ 
++// ESP32 cores build their own TinyUSB, whose headers come before this
++// library's and do not have tuh_rhport_recheck()
++#ifdef ARDUINO_ARCH_ESP32
++bool Adafruit_USBH_Host::recheck(void) { return false; }
++bool Adafruit_USBH_Host::recheckBusy(void) { return false; }
++#else
+ bool Adafruit_USBH_Host::recheck(void) { return tuh_rhport_recheck(_rhport); }
++bool Adafruit_USBH_Host::recheckBusy(void) {
++  return tuh_rhport_recheck_busy(_rhport);
++}
++#endif
+ 
+ // Invoked when received report from device via interrupt endpoint
+ TU_ATTR_WEAK void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
+diff --git a/src/arduino/Adafruit_USBH_Host.h b/src/arduino/Adafruit_USBH_Host.h
+index 75b2e26..c2d6a87 100644
+--- a/src/arduino/Adafruit_USBH_Host.h
++++ b/src/arduino/Adafruit_USBH_Host.h
+@@ -95,9 +95,17 @@ public:
+   // a device unplugged, replaced or power-cycled meanwhile is detected and
+   // enumerated again (tuh_umount_cb() then tuh_mount_cb()); an unchanged one
+   // only sees one control transfer. Call it from the code that runs task(),
+-  // i.e. loop1() when the host runs on core1. See tuh_rhport_recheck().
++  // i.e. loop1() when the host runs on core1. The check is done by task():
++  // keep calling it, and wait for recheckBusy() to return false before using
++  // the device. See tuh_rhport_recheck().
++  // Not available on ESP32 (its core provides TinyUSB): returns false there.
+   bool recheck(void);
+ 
++  // True from recheck() until the check is complete, including any
++  // re-enumeration it started. Can take several seconds for a device that
++  // does not answer. Always false on ESP32.
++  bool recheckBusy(void);
++
+   //------------- internal usage -------------//
+   static Adafruit_USBH_Host *_instance;
+ 
+-- 
+2.55.0.windows.2
+
+
+From 3b8fc8b302ec7f6d2ed8ce2513b75ecacdb7b5cd Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 22:42:56 +0000
+Subject: [PATCH 11/13] examples: msc_file_explorer_sleep: use the drive on
+ core1, after recheckBusy()
+
+Review fix: the example waited a fixed 2 s after asking for the recheck,
+then listed the drive on core0, while core1 could still be unmounting or
+mounting it (the recheck can take several seconds), and could sleep again
+before a new drive was mounted.
+
+Now core0 only sleeps and waits; core1, which runs the host stack, calls
+USBHost.recheck(), waits for USBHost.recheckBusy() to clear, lists the
+drive, then tells core0 it is done. Checking happens at the start too.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../msc_file_explorer_sleep.ino               | 56 +++++++++++++------
+ 1 file changed, 38 insertions(+), 18 deletions(-)
+
+diff --git a/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino b/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino
+index 995cf6c..ea7ec72 100644
+--- a/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino
++++ b/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino
+@@ -19,7 +19,10 @@
+  * drive being unplugged. After waking, USBHost.recheck() asks the device on the
+  * host port to identify itself: one that is gone or different is unmounted and
+  * the port enumerated again (tuh_msc_umount_cb() then tuh_msc_mount_cb()), an
+- * unchanged one is left mounted.
++ * unchanged one is left mounted. USBHost.recheckBusy() says when that is done.
++ *
++ * All drive access happens on core1, which runs the host stack: core0 only
++ * sleeps, then waits until core1 has checked and listed the drive.
+  *
+  * Requirements:
+  * - RP2040, arduino-pico core with the LowPower library, USB Stack "Adafruit TinyUSB"
+@@ -44,10 +47,11 @@ Adafruit_USBH_MSC_BlockDevice msc_block_dev;
+ FatVolume fatfs;
+ 
+ // if file system is successfully mounted on usb block device
+-volatile bool is_mounted = false;
++bool is_mounted = false;
+ 
+-// set by core0 after waking, handled by core1 which runs the host stack
+-volatile bool recheck_requested = false;
++// core0 asks core1 to check and list the drive, core1 says when it is done
++volatile bool check_requested = false;
++volatile bool check_done = false;
+ 
+ void setup() {
+   Serial.begin(115200);
+@@ -56,25 +60,34 @@ void setup() {
+ }
+ 
+ void loop() {
+-  if (is_mounted) {
+-    fatfs.ls(&Serial, LS_SIZE);
+-  } else {
+-    Serial.println("No drive mounted");
++  // Have core1 check the drive and list it. After a sleep, a changed drive takes
++  // a few seconds to enumerate; one that does not answer takes longer.
++  check_done = false;
++  check_requested = true;
++  for (uint32_t t0 = millis(); !check_done && millis() - t0 < 30000;) {
++    delay(10);
++  }
++  if (!check_done) {
++    Serial.println("The drive check did not finish");
+   }
+ 
+   Serial.println("Sleeping 10 s: unplug, swap or replug the drive now if you like");
+   Serial.flush();
+   LowPower.sleepFor(10000);
+   Serial.println("Awake");
++}
+ 
+-  // The host could not see the bus while asleep: have core1 check the drive
+-  recheck_requested = true;
++//------------- Core1 -------------//
++static bool checking = false;
+ 
+-  // Enumerating a new drive takes up to a second or so
+-  delay(2000);
++static void list_drive(void) {
++  if (is_mounted) {
++    fatfs.ls(&Serial, LS_SIZE);
++  } else {
++    Serial.println("No drive mounted");
++  }
+ }
+ 
+-//------------- Core1 -------------//
+ void setup1() {
+   // configure pio-usb: defined in usbh_helper.h
+   rp2040_configure_pio_usb();
+@@ -84,16 +97,23 @@ void setup1() {
+ }
+ 
+ void loop1() {
+-  // recheck() must be called from the code that runs USBHost.task()
+-  if (recheck_requested) {
+-    recheck_requested = false;
++  USBHost.task();
++
++  // recheck() and recheckBusy() are used from the code that runs USBHost.task()
++  if (check_requested) {
++    check_requested = false;
+     USBHost.recheck();
++    checking = true;
++  }
++  if (checking && !USBHost.recheckBusy()) {
++    checking = false;
++    list_drive();
++    check_done = true;
+   }
+-  USBHost.task();
+ }
+ 
+ //--------------------------------------------------------------------+
+-// TinyUSB Host callbacks
++// TinyUSB Host callbacks (core1)
+ //--------------------------------------------------------------------+
+ extern "C"
+ {
+-- 
+2.55.0.windows.2
+
+
+From 058c408f726e735100041d261192933714238d8b Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 22:45:08 +0000
+Subject: [PATCH 12/13] tinyusb (interim copy): host: tuh_rhport_recheck()
+ behind CFG_TUH_API_RHPORT_RECHECK (default off)
+
+Vendored copy of the matching commit on the tinyusb branch host-sleep-recheck, so this
+branch builds and runs before the next TinyUSB sync. Drop it when src/ is synced from
+TinyUSB with that change in.
+
+Review nit: the API's device descriptor buffer cost every host build RAM.
+Like CFG_TUH_API_EDPT_XFER, it is now built only when enabled. Disabled,
+the task loop's hooks compile to nothing.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/host/usbh.c   | 16 ++++++++++++++++
+ src/host/usbh.h   |  4 +++-
+ src/tusb_option.h |  5 +++++
+ 3 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/src/host/usbh.c b/src/host/usbh.c
+index 8e6c5fb..9e1d376 100644
+--- a/src/host/usbh.c
++++ b/src/host/usbh.c
+@@ -230,11 +230,13 @@ typedef struct {
+   usbh_call_after_t call_after;
+   // Per-daddr generation counter — bumped on usbh_device_close() to identify stale pending control transfer
+   uint8_t daddr_gen[TOTAL_DEVICES + 1];
++#if CFG_TUH_API_RHPORT_RECHECK
+   // tuh_rhport_recheck(): one check at a time, on the active controller
+   uint8_t recheck_state;        // RECHECK_*
+   uint8_t recheck_again;        // another check was asked for while this one ran
+   uint8_t recheck_daddr;        // the root device being probed
+   uint8_t recheck_gen;          // its daddr_gen when the probe was sent
++#endif
+ #if CFG_TUSB_OS_HAS_SCHEDULER
+   osal_task_handle_t task_hdl;  // host task handle, lazy-captured on first tuh_task_ext()
+ #endif
+@@ -244,6 +246,7 @@ typedef struct {
+ static uint8_t _usbh_controller_id = TUSB_INDEX_INVALID_8;
+ static usbh_data_t _usbh_data;
+ 
++#if CFG_TUH_API_RHPORT_RECHECK
+ // tuh_rhport_recheck() states. The probe's completion callback only records a verdict; the task loop acts on it in
+ // recheck_process(), because that callback also runs from device close and tuh_deinit(), where re-enumerating would
+ // re-enter the teardown.
+@@ -267,12 +270,19 @@ static bool recheck_due(void) {
+       return false;
+   }
+ }
++#else
++TU_ATTR_ALWAYS_INLINE static inline bool recheck_due(void) {
++  return false;
++}
++#endif
+ 
+ typedef struct {
+   TUH_EPBUF_TYPE_DEF(tusb_control_request_t, request);
+   TUH_EPBUF_DEF(ctrl, CFG_TUH_ENUMERATION_BUFSIZE);
++#if CFG_TUH_API_RHPORT_RECHECK
+   TUH_EPBUF_DEF(recheck, sizeof(tusb_desc_device_t)); // tuh_rhport_recheck(): kept apart from ctrl, which an
+                                                       // enumeration starting meanwhile may be using
++#endif
+ } usbh_epbuf_t;
+ CFG_TUH_MEM_SECTION static usbh_epbuf_t _usbh_epbuf;
+ 
+@@ -678,9 +688,11 @@ bool tuh_deinit(uint8_t rhport) {
+   // remove all devices on this rhport (hub_addr = 0, hub_port = 0)
+   remove_device_tree(rhport, 0, 0);
+ 
++#if CFG_TUH_API_RHPORT_RECHECK
+   // a re-check in progress ends with the controller
+   _usbh_data.recheck_state = RECHECK_IDLE;
+   _usbh_data.recheck_again = 0;
++#endif
+ 
+   // deinit host stack if no controller is active
+   if (!tuh_inited()) {
+@@ -1041,6 +1053,7 @@ bool tuh_task_stop(void) {
+ //--------------------------------------------------------------------+
+ // Root port re-check (after a system sleep)
+ //--------------------------------------------------------------------+
++#if CFG_TUH_API_RHPORT_RECHECK
+ // End a check, or start the one asked for while it ran
+ static void recheck_finish(void) {
+   (void) osal_mutex_lock(_usbh_mutex, OSAL_TIMEOUT_WAIT_FOREVER);
+@@ -1153,6 +1166,9 @@ bool tuh_rhport_recheck(uint8_t rhport) {
+ bool tuh_rhport_recheck_busy(uint8_t rhport) {
+   return tuh_rhport_is_active(rhport) && _usbh_data.recheck_state != RECHECK_IDLE;
+ }
++#else
++static void recheck_process(void) {}
++#endif
+ 
+ //--------------------------------------------------------------------+
+ // Control transfer
+diff --git a/src/host/usbh.h b/src/host/usbh.h
+index 24aecef..2405738 100644
+--- a/src/host/usbh.h
++++ b/src/host/usbh.h
+@@ -213,7 +213,8 @@ bool tuh_rhport_is_active(uint8_t rhport);
+ // Assert/de-assert Bus Reset signal to roothub port. USB specs: it should last 10-50ms
+ bool tuh_rhport_reset_bus(uint8_t rhport, bool active);
+ 
+-// Check that the device attached directly to a roothub port is still the one that was enumerated. Meant for after a
++#if CFG_TUH_API_RHPORT_RECHECK
++// Needs CFG_TUH_API_RHPORT_RECHECK = 1. Check that the device attached directly to a roothub port is still the one that was enumerated. Meant for after a
+ // system sleep that stopped the host controller (no SOF, interrupts not serviced): a device unplugged and replugged,
+ // replaced or power-cycled meanwhile leaves no detach behind, so the stack keeps talking to an address nothing answers.
+ // The device is sent GET_DESCRIPTOR(Device); if it does not answer, or another VID/PID does, it is removed and the
+@@ -229,6 +230,7 @@ bool tuh_rhport_recheck(uint8_t rhport);
+ // True from tuh_rhport_recheck() until its check is complete, including any re-enumeration it started (mounted,
+ // given up after its retries, or nothing attached). The probe can take up to CFG_TUH_CONTROL_TIMEOUT_MS.
+ bool tuh_rhport_recheck_busy(uint8_t rhport);
++#endif
+ 
+ //--------------------------------------------------------------------+
+ // Device API
+diff --git a/src/tusb_option.h b/src/tusb_option.h
+index e333693..788ae85 100644
+--- a/src/tusb_option.h
++++ b/src/tusb_option.h
+@@ -960,6 +960,11 @@
+   #define CFG_TUH_API_EDPT_XFER 0
+ #endif
+ 
++// tuh_rhport_recheck(): re-detect a root port device after a system sleep (costs a device descriptor buffer)
++#ifndef CFG_TUH_API_RHPORT_RECHECK
++  #define CFG_TUH_API_RHPORT_RECHECK 0
++#endif
++
+ #ifndef CFG_TUH_EDPT_DEDICATED_HWFIFO
+   #define CFG_TUH_EDPT_DEDICATED_HWFIFO 0
+ #endif
+-- 
+2.55.0.windows.2
+
+
+From dda4db1ebbcc17b8e2144d119853deb50d6855bd Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 22:45:08 +0000
+Subject: [PATCH 13/13] USBH: enable CFG_TUH_API_RHPORT_RECHECK on RP2040,
+ feature-test it for recheck()
+
+tuh_rhport_recheck() is now behind CFG_TUH_API_RHPORT_RECHECK (default off).
+The RP2040 port turns it on: LowPower sleep idles the core that runs the
+Pico-PIO-USB host. recheck()/recheckBusy() test the option instead of
+ARDUINO_ARCH_ESP32, so they return false wherever the TinyUSB in use does
+not have the API (ESP32 cores bring their own TinyUSB headers).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/arduino/Adafruit_USBH_Host.cpp            | 13 +++++++------
+ src/arduino/Adafruit_USBH_Host.h              |  5 +++--
+ src/arduino/ports/rp2040/tusb_config_rp2040.h |  6 ++++++
+ 3 files changed, 16 insertions(+), 8 deletions(-)
+
+diff --git a/src/arduino/Adafruit_USBH_Host.cpp b/src/arduino/Adafruit_USBH_Host.cpp
+index f755869..613c33b 100644
+--- a/src/arduino/Adafruit_USBH_Host.cpp
++++ b/src/arduino/Adafruit_USBH_Host.cpp
+@@ -148,16 +148,17 @@ void Adafruit_USBH_Host::task(uint32_t timeout_ms, bool in_isr) {
+   tuh_task_ext(timeout_ms, in_isr);
+ }
+ 
+-// ESP32 cores build their own TinyUSB, whose headers come before this
+-// library's and do not have tuh_rhport_recheck()
+-#ifdef ARDUINO_ARCH_ESP32
+-bool Adafruit_USBH_Host::recheck(void) { return false; }
+-bool Adafruit_USBH_Host::recheckBusy(void) { return false; }
+-#else
++// Built where the TinyUSB in use has the API enabled: the RP2040 port turns it
++// on. ESP32 cores build their own TinyUSB, whose headers come before this
++// library's and do not have it.
++#if defined(CFG_TUH_API_RHPORT_RECHECK) && CFG_TUH_API_RHPORT_RECHECK
+ bool Adafruit_USBH_Host::recheck(void) { return tuh_rhport_recheck(_rhport); }
+ bool Adafruit_USBH_Host::recheckBusy(void) {
+   return tuh_rhport_recheck_busy(_rhport);
+ }
++#else
++bool Adafruit_USBH_Host::recheck(void) { return false; }
++bool Adafruit_USBH_Host::recheckBusy(void) { return false; }
+ #endif
+ 
+ // Invoked when received report from device via interrupt endpoint
+diff --git a/src/arduino/Adafruit_USBH_Host.h b/src/arduino/Adafruit_USBH_Host.h
+index c2d6a87..ee839a7 100644
+--- a/src/arduino/Adafruit_USBH_Host.h
++++ b/src/arduino/Adafruit_USBH_Host.h
+@@ -98,12 +98,13 @@ public:
+   // i.e. loop1() when the host runs on core1. The check is done by task():
+   // keep calling it, and wait for recheckBusy() to return false before using
+   // the device. See tuh_rhport_recheck().
+-  // Not available on ESP32 (its core provides TinyUSB): returns false there.
++  // Needs CFG_TUH_API_RHPORT_RECHECK, which the RP2040 port enables; returns
++  // false elsewhere (e.g. ESP32, whose core provides TinyUSB).
+   bool recheck(void);
+ 
+   // True from recheck() until the check is complete, including any
+   // re-enumeration it started. Can take several seconds for a device that
+-  // does not answer. Always false on ESP32.
++  // does not answer. Always false where recheck() is not available.
+   bool recheckBusy(void);
+ 
+   //------------- internal usage -------------//
+diff --git a/src/arduino/ports/rp2040/tusb_config_rp2040.h b/src/arduino/ports/rp2040/tusb_config_rp2040.h
+index 5ddd4ed..4ae75aa 100644
+--- a/src/arduino/ports/rp2040/tusb_config_rp2040.h
++++ b/src/arduino/ports/rp2040/tusb_config_rp2040.h
+@@ -143,6 +143,12 @@ extern "C" {
+ // Enable tuh_edpt_xfer() API
+ // #define CFG_TUH_API_EDPT_XFER       1
+ 
++// Enable tuh_rhport_recheck() (USBHost.recheck()): LowPower sleep idles the
++// core running the Pico-PIO-USB host, which then misses a detach
++#ifndef CFG_TUH_API_RHPORT_RECHECK
++#define CFG_TUH_API_RHPORT_RECHECK 1
++#endif
++
+ // Number of mass storage
+ #define CFG_TUH_MSC 1
+ 
 -- 
 2.55.0.windows.2
 
