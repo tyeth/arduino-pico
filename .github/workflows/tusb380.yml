@@ -7,6 +7,7 @@
 #   f = d + tests/tusb380/patches/fix_msc_host.py (MSC host: fail-complete instead of TU_ASSERT, wait_for_io timeout, csw status)
 #   g = f + tests/tusb380/patches/fix_enum.py (SET_CONFIGURATION STALL re-enumerates; MSC set_config chain bounded and always completes)
 #   h = g + tests/tusb380/patches/fix_enum_backoff.py (enumeration retries wait CFG_TUH_ENUM_RETRY_DELAY_MS = 1 s)
+#   p1/p2/p3 = one upstream PR branch each (pr/stdio-flush-library-api, pr/lowpower-weak-tud-stubs, pr/adafruit-tinyusb-3.8.0) with its own submodule pointer
 name: TinyUSB 3.8.0 link matrix
 
 on:
@@ -41,7 +42,14 @@ jobs:
     - name: Adafruit_TinyUSB_Arduino -> 23e8953 (3.8.0), or the pointer of tinyusb-380-core-fixes for core d
       run: |
         SHA=23e8953f403c296127c5a57d798159468a9f1e57
-        if [ "${{ matrix.core }}" = d ] || [ "${{ matrix.core }}" = e ] || [ "${{ matrix.core }}" = f ] || [ "${{ matrix.core }}" = g ] || [ "${{ matrix.core }}" = h ] || [ "${{ matrix.core }}" = u ]; then
+        case "${{ matrix.core }}" in
+          p1) PRB=pr/stdio-flush-library-api ;; p2) PRB=pr/lowpower-weak-tud-stubs ;; p3) PRB=pr/adafruit-tinyusb-3.8.0 ;; *) PRB= ;;
+        esac
+        if [ -n "$PRB" ]; then
+          git fetch origin $PRB
+          SHA=$(git rev-parse FETCH_HEAD:libraries/Adafruit_TinyUSB_Arduino)
+          echo "PR branch $PRB $(git rev-parse --short FETCH_HEAD) pins Adafruit_TinyUSB_Arduino $SHA"
+        elif [ "${{ matrix.core }}" = d ] || [ "${{ matrix.core }}" = e ] || [ "${{ matrix.core }}" = f ] || [ "${{ matrix.core }}" = g ] || [ "${{ matrix.core }}" = h ] || [ "${{ matrix.core }}" = u ]; then
           git fetch origin tinyusb-380-core-fixes
           SHA=$(git rev-parse FETCH_HEAD:libraries/Adafruit_TinyUSB_Arduino)
           echo "core-fix branch $(git rev-parse --short FETCH_HEAD) pins Adafruit_TinyUSB_Arduino $SHA"
@@ -54,6 +62,12 @@ jobs:
     - name: Core variant ${{ matrix.core }}
       run: |
         case "${{ matrix.core }}" in
+          p1|p2|p3)
+             # one arduino-pico PR branch exactly as pushed: upstream master + its single commit
+             case "${{ matrix.core }}" in p1) PRB=pr/stdio-flush-library-api ;; p2) PRB=pr/lowpower-weak-tud-stubs ;; p3) PRB=pr/adafruit-tinyusb-3.8.0 ;; esac
+             git fetch origin $PRB
+             git checkout FETCH_HEAD -- cores libraries/LowPower libraries/ADCInput
+             git log -1 --oneline FETCH_HEAD ;;
           a) git checkout 4a79653 -- cores/rp2040/main.cpp libraries/LowPower/src/LowPower.cpp ;;
           b) git checkout 5cc2a3b -- cores/rp2040/main.cpp
              git checkout 4a79653 -- libraries/LowPower/src/LowPower.cpp ;;
