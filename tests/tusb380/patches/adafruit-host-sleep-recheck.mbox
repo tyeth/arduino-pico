@@ -1,0 +1,614 @@
+From de04d6060396a74d8ce0d65c152a1acdc7c856e8 Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 20:58:15 +0000
+Subject: [PATCH 1/5] tinyusb (interim copy): host: re-enumerate a device that
+ STALLs SET_CONFIGURATION
+
+Vendored copy of the matching commit on the tinyusb branch host-sleep-recheck, so this
+branch builds and runs before the next TinyUSB sync. Drop it when src/ is synced from
+TinyUSB with that change in.
+
+process_enumeration() treats only FAILED/TIMEOUT as an enumeration error.
+A STALLed SET_CONFIGURATION falls through to ENUM_CONFIG_DRIVER: "Device
+configured", and the class drivers open against endpoints that do not
+exist. Their setup requests then fail; with the MSC driver's config_abort()
+the device ends up mounted with interfaces that never work, and nothing
+retries it.
+
+Seen on hardware with a CircuitPython Feather ESP32-S2 behind an RP2040
+Pico-PIO-USB host: it STALLs SET_CONFIGURATION on roughly half of all
+enumerations right after a bus reset or hot-plug, host awake. Measured on
+the TinyUSB copy in Adafruit_TinyUSB_Arduino 3.8.0 (where the MSC setup
+chain still asserted instead of aborting): an ordinary hot-plug mounted
+1 time in 5 without this change, 5 in 5 with it. The retry (enum_retry,
+then the root port retry) re-resets the port and the device configures.
+
+Only the SET_CONFIGURATION result is affected; STALLs that are legitimate
+during enumeration (string descriptors, class requests) keep their meaning.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/host/usbh.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/src/host/usbh.c b/src/host/usbh.c
+index b0282fb..d355344 100644
+--- a/src/host/usbh.c
++++ b/src/host/usbh.c
+@@ -2004,6 +2004,17 @@ static void process_enumeration(tuh_xfer_t *xfer) {
+   if (daddr > 0) {
+     TU_ASSERT(dev != NULL,);
+   }
++
++  // A device that STALLs SET_CONFIGURATION is not configured: its endpoints do not exist and every class driver would
++  // fail against it, leaving it half-mounted for good. Re-enumerate it (fresh port reset) instead of going on.
++  if (XFER_RESULT_STALLED == xfer->result && ENUM_CONFIG_DRIVER == state) {
++    TU_LOG_USBH("[%u] SET_CONFIGURATION STALLed\r\n", daddr);
++    if (!enum_retry()) {
++      enum_full_complete(false);
++    }
++    return;
++  }
++
+   uint16_t langid = 0x0409; // default is English
+   bool is_enum_failed = false;
+ 
+-- 
+2.55.0.windows.2
+
+
+From 20fd22cf6c70b9967ff487a94a1eff03eb9c50d7 Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 20:58:16 +0000
+Subject: [PATCH 2/5] tinyusb (interim copy): host: add tuh_rhport_recheck() to
+ find a device replaced while the host slept
+
+Vendored copy of the matching commit on the tinyusb branch host-sleep-recheck, so this
+branch builds and runs before the next TinyUSB sync. Drop it when src/ is synced from
+TinyUSB with that change in.
+
+A system sleep that stops the host controller (no SOF, its interrupts not
+serviced) cannot see a detach. A device unplugged and replugged, replaced
+or power-cycled meanwhile is back at address 0 when the host wakes, while
+the stack still holds the old one at its old address: every transfer
+fails, nothing re-enumerates it, and only a physical replug with the host
+awake recovers. On an RP2040 the arduino-pico LowPower library idles the
+core that runs the Pico-PIO-USB host, whose 1 ms SOF timer is its only
+detach detection; the same applies to any HCD whose controller is halted
+or unclocked in sleep.
+
+tuh_rhport_recheck(rhport) queues a check in the usbh task: the device
+attached directly to the port is sent GET_DESCRIPTOR(Device). One that
+answers with the same VID/PID is left alone (one control transfer, no
+remount); otherwise an attach event is posted, so usbh removes the old
+device, resets the port and enumerates whatever is there. Devices behind a
+hub are covered by the hub's own port status change.
+
+Equivalent logic (the probe and hcd_event_device_attach() from the
+application) was verified on a Feather RP2040 USB Host with a CircuitPython
+Feather ESP32-S2 power-cycled during a 15 s light sleep: 15/15 swaps and
+no-swaps told apart, 10/10 swaps remounted. This commit itself has only
+been compiled (arm-none-eabi-gcc 14.3, -Wall -Wextra -Wconversion
+-Wsign-conversion -Wshadow -Werror), not run on hardware.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/host/usbh.c | 54 +++++++++++++++++++++++++++++++++++++++++++++++++
+ src/host/usbh.h | 10 +++++++++
+ 2 files changed, 64 insertions(+)
+
+diff --git a/src/host/usbh.c b/src/host/usbh.c
+index d355344..79a8d94 100644
+--- a/src/host/usbh.c
++++ b/src/host/usbh.c
+@@ -242,6 +242,8 @@ static usbh_data_t _usbh_data;
+ typedef struct {
+   TUH_EPBUF_TYPE_DEF(tusb_control_request_t, request);
+   TUH_EPBUF_DEF(ctrl, CFG_TUH_ENUMERATION_BUFSIZE);
++  TUH_EPBUF_DEF(recheck, sizeof(tusb_desc_device_t)); // tuh_rhport_recheck(): kept apart from ctrl, which an
++                                                      // enumeration starting meanwhile may be using
+ } usbh_epbuf_t;
+ CFG_TUH_MEM_SECTION static usbh_epbuf_t _usbh_epbuf;
+ 
+@@ -993,6 +995,58 @@ bool tuh_task_stop(void) {
+   return true;
+ }
+ 
++//--------------------------------------------------------------------+
++// Root port re-check (after a system sleep)
++//--------------------------------------------------------------------+
++static void recheck_root_complete(tuh_xfer_t *xfer) {
++  const uint8_t rhport = (uint8_t) xfer->user_data;
++  const usbh_device_t *dev = get_device(xfer->daddr);
++  const tusb_desc_device_t *desc = (const tusb_desc_device_t *) _usbh_epbuf.recheck;
++
++  if (dev == NULL || !dev->connected) {
++    return; // detached meanwhile: its removal is already handled
++  }
++  if (xfer->result == XFER_RESULT_SUCCESS && xfer->actual_len == sizeof(tusb_desc_device_t) &&
++      desc->idVendor == dev->desc_device.idVendor && desc->idProduct == dev->desc_device.idProduct) {
++    TU_LOG_USBH("[%u:%u] Re-check: same device\r\n", rhport, xfer->daddr);
++    return;
++  }
++  // No answer at its address (a new or reset device waits at address 0), or another device answered: what was
++  // mounted is gone. An attach event removes it, resets the port and enumerates what is there now.
++  TU_LOG_USBH("[%u:%u] Re-check: device gone or replaced, re-enumerating\r\n", rhport, xfer->daddr);
++  hcd_event_device_attach(rhport, false);
++}
++
++static void recheck_root_call(void *param) {
++  const uint8_t rhport = (uint8_t) (uintptr_t) param;
++  if (_usbh_data.enumerating_daddr != TUSB_INDEX_INVALID_8) {
++    return; // an enumeration is talking to the bus already
++  }
++  for (uint8_t daddr = 1; daddr <= TOTAL_DEVICES; daddr++) {
++    const usbh_device_t *dev = get_device(daddr);
++    if (dev->connected && dev->bus_info.rhport == rhport && dev->bus_info.hub_addr == 0) {
++      if (!tuh_descriptor_get_device(daddr, _usbh_epbuf.recheck, sizeof(tusb_desc_device_t), recheck_root_complete,
++                                     rhport)) {
++        hcd_event_device_attach(rhport, false);
++      }
++      return; // one device per root port; a hub reports what changed behind it through its own port status
++    }
++  }
++}
++
++bool tuh_rhport_recheck(uint8_t rhport) {
++  TU_VERIFY(tuh_rhport_is_active(rhport));
++  // Queued for the usbh task like tuh_task_stop(): the check sends a control transfer and may post an attach
++  hcd_event_t event = { 0 };
++  event.rhport          = rhport;
++  event.event_id        = USBH_EVENT_FUNC_CALL;
++  event.func_call.func  = recheck_root_call;
++  event.func_call.param = (void *) (uintptr_t) rhport;
++  TU_VERIFY(osal_queue_send(_usbh_q, &event, false));
++  tuh_event_hook_cb(event.rhport, event.event_id, false);
++  return true;
++}
++
+ //--------------------------------------------------------------------+
+ // Control transfer
+ //--------------------------------------------------------------------+
+diff --git a/src/host/usbh.h b/src/host/usbh.h
+index 44a91a1..d974be5 100644
+--- a/src/host/usbh.h
++++ b/src/host/usbh.h
+@@ -213,6 +213,16 @@ bool tuh_rhport_is_active(uint8_t rhport);
+ // Assert/de-assert Bus Reset signal to roothub port. USB specs: it should last 10-50ms
+ bool tuh_rhport_reset_bus(uint8_t rhport, bool active);
+ 
++// Check that the device attached directly to a roothub port is still the one that was enumerated. Meant for after a
++// system sleep that stopped the host controller (no SOF, interrupts not serviced): a device unplugged and replugged,
++// replaced or power-cycled meanwhile leaves no detach behind, so the stack keeps talking to an address nothing answers.
++// The device is sent GET_DESCRIPTOR(Device); if it does not answer, or another VID/PID does, it is removed and the
++// port enumerated again (tuh_umount_cb() then tuh_mount_cb()). An unchanged device sees one control transfer.
++// Devices behind a hub are covered by the hub's own port status. The check runs in the usbh task; this only queues
++// it, so call it from task context (not an ISR) on the core that runs tuh_task(). Returns false if rhport is not an
++// active host port or the queue is full.
++bool tuh_rhport_recheck(uint8_t rhport);
++
+ //--------------------------------------------------------------------+
+ // Device API
+ //--------------------------------------------------------------------+
+-- 
+2.55.0.windows.2
+
+
+From e7f6c2208e844a4271feb0309a7d7a251e37f151 Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 20:56:50 +0000
+Subject: [PATCH 3/5] USBH MSC block device: time out a command that never
+ completes, honour CSW status
+
+wait_for_io() only gave up when the device unmounted. A device that stops
+answering without a detach the host can see (one swapped or power-cycled
+while the host was asleep, see tuh_rhport_recheck()) left the SdFat call
+spinning forever. Give up after ADAFRUIT_USBH_MSC_IO_TIMEOUT_MS (3000 ms,
+overridable).
+
+_io_complete_cb() assumed every command succeeded ("TODO skip csw
+status"), so a failed READ/WRITE was reported to SdFat as good data.
+Return the CSW status from wait_for_io() instead.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/arduino/msc/Adafruit_USBH_MSC.cpp | 12 ++++++++++--
+ src/arduino/msc/Adafruit_USBH_MSC.h   |  7 +++++++
+ 2 files changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/src/arduino/msc/Adafruit_USBH_MSC.cpp b/src/arduino/msc/Adafruit_USBH_MSC.cpp
+index e004274..37388c7 100644
+--- a/src/arduino/msc/Adafruit_USBH_MSC.cpp
++++ b/src/arduino/msc/Adafruit_USBH_MSC.cpp
+@@ -39,6 +39,7 @@
+ Adafruit_USBH_MSC_BlockDevice::Adafruit_USBH_MSC_BlockDevice() {
+   _daddr = _lun = 0;
+   _busy = false;
++  _io_ok = false;
+   _wr_cb = NULL;
+ }
+ 
+@@ -65,6 +66,7 @@ bool Adafruit_USBH_MSC_BlockDevice::mounted(void) {
+ bool Adafruit_USBH_MSC_BlockDevice::isBusy(void) { return _busy; }
+ 
+ bool Adafruit_USBH_MSC_BlockDevice::wait_for_io(void) {
++  uint32_t const start_ms = tusb_time_millis_api();
+   while (_busy) {
+     // Removal closes the MSC interface without completing the pending command.
+     // Release the synchronous caller instead of waiting for a missing callback.
+@@ -72,12 +74,18 @@ bool Adafruit_USBH_MSC_BlockDevice::wait_for_io(void) {
+       _busy = false;
+       return false;
+     }
++    // A device that stops answering without a detach the host can see (e.g.
++    // swapped while the host was asleep) may never complete the command
++    if (tusb_time_millis_api() - start_ms >= ADAFRUIT_USBH_MSC_IO_TIMEOUT_MS) {
++      _busy = false;
++      return false;
++    }
+     if (tuh_task_event_ready()) {
+       tuh_task();
+     }
+   }
+ 
+-  return true;
++  return _io_ok;
+ }
+ 
+ bool Adafruit_USBH_MSC_BlockDevice::_io_complete_cb(
+@@ -88,7 +96,7 @@ bool Adafruit_USBH_MSC_BlockDevice::_io_complete_cb(
+     return false;
+   }
+ 
+-  // TODO skip csw status: assuming io is successful
++  _io_ok = (cb_data->csw->status == MSC_CSW_STATUS_PASSED);
+   _busy = false;
+ 
+   switch (cb_data->cbw->command[0]) {
+diff --git a/src/arduino/msc/Adafruit_USBH_MSC.h b/src/arduino/msc/Adafruit_USBH_MSC.h
+index d731495..3d50aeb 100644
+--- a/src/arduino/msc/Adafruit_USBH_MSC.h
++++ b/src/arduino/msc/Adafruit_USBH_MSC.h
+@@ -32,6 +32,12 @@
+ 
+ #include "SdFat_Adafruit_Fork.h"
+ 
++// Longest a sector read/write waits for its SCSI command to complete before it
++// fails (e.g. a device that stopped answering without detaching)
++#ifndef ADAFRUIT_USBH_MSC_IO_TIMEOUT_MS
++#define ADAFRUIT_USBH_MSC_IO_TIMEOUT_MS 3000
++#endif
++
+ class Adafruit_USBH_MSC_BlockDevice : public FsBlockDeviceInterface {
+ public:
+   Adafruit_USBH_MSC_BlockDevice();
+@@ -66,6 +72,7 @@ private:
+   // TODO use mutex to prevent race condition or atomic for better
+   // implementation
+   volatile bool _busy;
++  volatile bool _io_ok; // the last command's CSW reported success
+ 
+   tuh_msc_complete_cb_t _wr_cb;
+ 
+-- 
+2.55.0.windows.2
+
+
+From 53fd2641f955954a1db253771c9408a4558a2a21 Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 20:57:13 +0000
+Subject: [PATCH 4/5] USBH: add Adafruit_USBH_Host::recheck() for after a sleep
+
+Thin wrapper over tuh_rhport_recheck() on the port passed to begin(): call
+it after waking from a sleep that stopped the host (arduino-pico LowPower
+idles the core that runs a Pico-PIO-USB host) so that a device swapped or
+power-cycled meanwhile is unmounted and enumerated again instead of being
+addressed at a stale address forever.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/arduino/Adafruit_USBH_Host.cpp | 2 ++
+ src/arduino/Adafruit_USBH_Host.h   | 8 ++++++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/src/arduino/Adafruit_USBH_Host.cpp b/src/arduino/Adafruit_USBH_Host.cpp
+index cdba773..4b4879d 100644
+--- a/src/arduino/Adafruit_USBH_Host.cpp
++++ b/src/arduino/Adafruit_USBH_Host.cpp
+@@ -148,6 +148,8 @@ void Adafruit_USBH_Host::task(uint32_t timeout_ms, bool in_isr) {
+   tuh_task_ext(timeout_ms, in_isr);
+ }
+ 
++bool Adafruit_USBH_Host::recheck(void) { return tuh_rhport_recheck(_rhport); }
++
+ // Invoked when received report from device via interrupt endpoint
+ TU_ATTR_WEAK void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
+                                              uint8_t const *report,
+diff --git a/src/arduino/Adafruit_USBH_Host.h b/src/arduino/Adafruit_USBH_Host.h
+index 8daa8a7..75b2e26 100644
+--- a/src/arduino/Adafruit_USBH_Host.h
++++ b/src/arduino/Adafruit_USBH_Host.h
+@@ -90,6 +90,14 @@ public:
+   bool begin(uint8_t rhport);
+   void task(uint32_t timeout_ms = UINT32_MAX, bool in_isr = false);
+ 
++  // Call after waking from a sleep that stopped the host (e.g. LowPower
++  // sleepFor()/dormantFor() on RP2040, which idles the core running the host):
++  // a device unplugged, replaced or power-cycled meanwhile is detected and
++  // enumerated again (tuh_umount_cb() then tuh_mount_cb()); an unchanged one
++  // only sees one control transfer. Call it from the code that runs task(),
++  // i.e. loop1() when the host runs on core1. See tuh_rhport_recheck().
++  bool recheck(void);
++
+   //------------- internal usage -------------//
+   static Adafruit_USBH_Host *_instance;
+ 
+-- 
+2.55.0.windows.2
+
+
+From c874ff36bdaccf0c541bd9145947009cf6ace78f Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Thu, 19 Nov 2026 20:58:09 +0000
+Subject: [PATCH 5/5] examples: DualRole msc_file_explorer_sleep, a host that
+ sleeps and rechecks its drive
+
+RP2040 (arduino-pico LowPower, Pico-PIO-USB host on core1): lists the
+drive, sleeps 10 s, then calls USBHost.recheck() from core1 so a drive
+unplugged, swapped or power-cycled during the sleep is unmounted and the
+new one mounted, while an unchanged drive stays mounted. Built for
+pico_rp2040_tinyusb only (needs the LowPower library).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../.pico_rp2040_tinyusb.test.only            |   0
+ .../msc_file_explorer_sleep.ino               | 126 ++++++++++++++++++
+ .../msc_file_explorer_sleep/usbh_helper.h     |  99 ++++++++++++++
+ 3 files changed, 225 insertions(+)
+ create mode 100644 examples/DualRole/MassStorage/msc_file_explorer_sleep/.pico_rp2040_tinyusb.test.only
+ create mode 100644 examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino
+ create mode 100644 examples/DualRole/MassStorage/msc_file_explorer_sleep/usbh_helper.h
+
+diff --git a/examples/DualRole/MassStorage/msc_file_explorer_sleep/.pico_rp2040_tinyusb.test.only b/examples/DualRole/MassStorage/msc_file_explorer_sleep/.pico_rp2040_tinyusb.test.only
+new file mode 100644
+index 0000000..e69de29
+diff --git a/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino b/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino
+new file mode 100644
+index 0000000..995cf6c
+--- /dev/null
++++ b/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino
+@@ -0,0 +1,126 @@
++/*********************************************************************
++ Adafruit invests time and resources providing this open source code,
++ please support Adafruit and open-source hardware by purchasing
++ products from Adafruit!
++
++ MIT license, check LICENSE for more information
++ Copyright (c) 2026 for Adafruit Industries
++ All text above, and the splash screen below must be included in
++ any redistribution
++*********************************************************************/
++
++/* This example is a USB host that sleeps between uses of a USB drive, and
++ * keeps working when the drive is unplugged, swapped or power-cycled while it
++ * sleeps.
++ * - Device (Serial) runs on the native usb controller (roothub port0), core0
++ * - Host runs on 2 GPIOs with Pico-PIO-USB (roothub port1), core1
++ *
++ * While asleep, the LowPower library idles core1, so the host cannot see a
++ * drive being unplugged. After waking, USBHost.recheck() asks the device on the
++ * host port to identify itself: one that is gone or different is unmounted and
++ * the port enumerated again (tuh_msc_umount_cb() then tuh_msc_mount_cb()), an
++ * unchanged one is left mounted.
++ *
++ * Requirements:
++ * - RP2040, arduino-pico core with the LowPower library, USB Stack "Adafruit TinyUSB"
++ * - [Pico-PIO-USB](https://github.com/sekigon-gonnoc/Pico-PIO-USB) library
++ * - 2 consecutive GPIOs: D+ is defined by PIN_USB_HOST_DP, D- = D+ +1
++ * - Provide VBus (5v) and GND for peripheral
++ * - CPU Speed must be either 120 or 240 Mhz. Selected via "Menu -> CPU Speed"
++ */
++
++// SdFat is required for using Adafruit_USBH_MSC_SdFatDevice
++#include "SdFat_Adafruit_Fork.h"
++
++// USBHost is defined in usbh_helper.h
++#include "usbh_helper.h"
++
++#include <LowPower.h>
++
++// USB Host MSC Block Device object which implemented API for use with SdFat
++Adafruit_USBH_MSC_BlockDevice msc_block_dev;
++
++// file system object from SdFat
++FatVolume fatfs;
++
++// if file system is successfully mounted on usb block device
++volatile bool is_mounted = false;
++
++// set by core0 after waking, handled by core1 which runs the host stack
++volatile bool recheck_requested = false;
++
++void setup() {
++  Serial.begin(115200);
++  // while ( !Serial ) delay(10);   // wait for native usb
++  Serial.println("TinyUSB Host Mass Storage: sleep and recheck example");
++}
++
++void loop() {
++  if (is_mounted) {
++    fatfs.ls(&Serial, LS_SIZE);
++  } else {
++    Serial.println("No drive mounted");
++  }
++
++  Serial.println("Sleeping 10 s: unplug, swap or replug the drive now if you like");
++  Serial.flush();
++  LowPower.sleepFor(10000);
++  Serial.println("Awake");
++
++  // The host could not see the bus while asleep: have core1 check the drive
++  recheck_requested = true;
++
++  // Enumerating a new drive takes up to a second or so
++  delay(2000);
++}
++
++//------------- Core1 -------------//
++void setup1() {
++  // configure pio-usb: defined in usbh_helper.h
++  rp2040_configure_pio_usb();
++
++  // run host stack on controller (rhport) 1
++  USBHost.begin(1);
++}
++
++void loop1() {
++  // recheck() must be called from the code that runs USBHost.task()
++  if (recheck_requested) {
++    recheck_requested = false;
++    USBHost.recheck();
++  }
++  USBHost.task();
++}
++
++//--------------------------------------------------------------------+
++// TinyUSB Host callbacks
++//--------------------------------------------------------------------+
++extern "C"
++{
++
++// Invoked when a device with MassStorage interface is mounted
++void tuh_msc_mount_cb(uint8_t dev_addr) {
++  Serial.printf("Drive attached, address = %d\r\n", dev_addr);
++
++  // Initialize block device with MSC device address
++  msc_block_dev.begin(dev_addr);
++
++  // For simplicity this example only support LUN 0
++  msc_block_dev.setActiveLUN(0);
++
++  is_mounted = fatfs.begin(&msc_block_dev);
++}
++
++// Invoked when a device with MassStorage interface is unmounted
++void tuh_msc_umount_cb(uint8_t dev_addr) {
++  Serial.printf("Drive removed, address = %d\r\n", dev_addr);
++
++  // unmount file system
++  is_mounted = false;
++  fatfs.end();
++
++  // end block device
++  msc_block_dev.end();
++}
++
++}
+diff --git a/examples/DualRole/MassStorage/msc_file_explorer_sleep/usbh_helper.h b/examples/DualRole/MassStorage/msc_file_explorer_sleep/usbh_helper.h
+new file mode 100644
+index 0000000..29c1a6a
+--- /dev/null
++++ b/examples/DualRole/MassStorage/msc_file_explorer_sleep/usbh_helper.h
+@@ -0,0 +1,99 @@
++/*********************************************************************
++ Adafruit invests time and resources providing this open source code,
++ please support Adafruit and open-source hardware by purchasing
++ products from Adafruit!
++
++ MIT license, check LICENSE for more information
++ Copyright (c) 2019 Ha Thach for Adafruit Industries
++ All text above, and the splash screen below must be included in
++ any redistribution
++*********************************************************************/
++
++#ifndef USBH_HELPER_H
++#define USBH_HELPER_H
++
++#ifdef ARDUINO_ARCH_RP2040
++  // pio-usb is required for rp2040 host
++  #include "pio_usb.h"
++
++  // Pin D+ for host, D- = D+ + 1
++  #ifndef PIN_USB_HOST_DP
++  #define PIN_USB_HOST_DP  16
++  #endif
++
++  // Pin for enabling Host VBUS. comment out if not used
++  #ifndef PIN_5V_EN
++  #define PIN_5V_EN        18
++  #endif
++
++  #ifndef PIN_5V_EN_STATE
++  #define PIN_5V_EN_STATE  1
++  #endif
++#endif // ARDUINO_ARCH_RP2040
++
++#include "Adafruit_TinyUSB.h"
++
++#if defined(CFG_TUH_MAX3421) && CFG_TUH_MAX3421
++  // USB Host using MAX3421E: SPI, CS, INT
++  #include "SPI.h"
++
++  #if defined(ARDUINO_METRO_ESP32S2)
++    Adafruit_USBH_Host USBHost(&SPI, 15, 14);
++  #elif defined(ARDUINO_ADAFRUIT_FEATHER_ESP32_V2)
++    Adafruit_USBH_Host USBHost(&SPI, 33, 15);
++  #else
++    // Default CS and INT are pin 10, 9
++    Adafruit_USBH_Host USBHost(&SPI, 10, 9);
++  #endif
++#else
++  // Native USB Host such as rp2040
++  Adafruit_USBH_Host USBHost;
++#endif
++
++//--------------------------------------------------------------------+
++// Helper Functions
++//--------------------------------------------------------------------+
++
++#ifdef ARDUINO_ARCH_RP2040
++static void rp2040_configure_pio_usb(void) {
++  //while ( !Serial ) delay(10);   // wait for native usb
++  Serial.println("Core1 setup to run TinyUSB host with pio-usb");
++
++  // Check for CPU frequency, must be multiple of 12 Mhz for bit-banging USB
++  uint32_t cpu_hz = clock_get_hz(clk_sys);
++  if (cpu_hz % 12000000UL) {
++    while (!Serial) {
++      delay(10);   // wait for native usb
++    }
++    Serial.printf("Error: CPU Clock = %lu, PIO USB require CPU clock must be multiple of 12 Mhz\r\n", cpu_hz);
++    Serial.printf("Change your CPU Clock to 12*n Mhz in Menu->CPU Speed \r\n");
++    while (1) {
++      delay(1);
++    }
++  }
++
++#ifdef PIN_5V_EN
++  pinMode(PIN_5V_EN, OUTPUT);
++  digitalWrite(PIN_5V_EN, PIN_5V_EN_STATE);
++#endif
++
++  pio_usb_configuration_t pio_cfg = PIO_USB_DEFAULT_CONFIG;
++  pio_cfg.pin_dp = PIN_USB_HOST_DP;
++
++#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
++  // For pico-w, PIO is also used to communicate with cyw43
++  // Therefore we need to alternate the pio-usb configuration
++  // details https://github.com/sekigon-gonnoc/Pico-PIO-USB/issues/46
++  pio_cfg.sm_tx      = 3;
++  pio_cfg.sm_rx      = 2;
++  pio_cfg.sm_eop     = 3;
++  pio_cfg.pio_rx_num = 0;
++  pio_cfg.pio_tx_num = 1;
++  pio_cfg.tx_ch      = 9;
++#endif
++
++  USBHost.configure_pio_usb(1, &pio_cfg);
++}
++#endif
++
++#endif
+-- 
+2.55.0.windows.2
+
