@@ -59,7 +59,7 @@ index d731495..cd82c48 100644
 2.55.0.windows.2
 
 
-From e15b84c072f51c84138c0f19757a7721cba66c2e Mon Sep 17 00:00:00 2001
+From b800d4a0e8aece93b174147dd9eb9b34164774fb Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:21:52 +0000
 Subject: [PATCH 2/6] USBH: add USBHost.end() to stop the host stack
@@ -84,7 +84,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 19 insertions(+), 4 deletions(-)
 
 diff --git a/src/arduino/Adafruit_USBH_Host.cpp b/src/arduino/Adafruit_USBH_Host.cpp
-index cdba773..a994ca1 100644
+index cdba773..6b1a88f 100644
 --- a/src/arduino/Adafruit_USBH_Host.cpp
 +++ b/src/arduino/Adafruit_USBH_Host.cpp
 @@ -123,10 +123,13 @@ bool Adafruit_USBH_Host::begin(uint8_t rhport) {
@@ -99,8 +99,8 @@ index cdba773..a994ca1 100644
 +  // Only once: begin() is called again after end().
 +  if (max3421_intr_sem == NULL) {
 +    max3421_intr_sem = xSemaphoreCreateBinary();
-+    xTaskCreateUniversal(max3421_intr_task, "max3421 intr", 2048, NULL, 5,
-+                         NULL, ARDUINO_RUNNING_CORE);
++    xTaskCreateUniversal(max3421_intr_task, "max3421 intr", 2048, NULL, 5, NULL,
++                         ARDUINO_RUNNING_CORE);
 +  }
  #else
    _spi->begin();
@@ -139,7 +139,7 @@ index 8daa8a7..99d2204 100644
 2.55.0.windows.2
 
 
-From ef47e36f7fd5c044728ca6b57cd688af4cab7f05 Mon Sep 17 00:00:00 2001
+From 6c730aca03149de9da97c1e99a9d2b78292b7f8a Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:22:21 +0000
 Subject: [PATCH 3/6] examples: DualRole msc_file_explorer_sleep, a USB host
@@ -440,7 +440,7 @@ index 0000000..29c1a6a
 2.55.0.windows.2
 
 
-From 553397513cd5b76a6e25e5455e3fc40e37da73bb Mon Sep 17 00:00:00 2001
+From ac7dad74bccb358d371bfadaddbc2d462203ed83 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 22:49:37 +0000
 Subject: [PATCH 4/6] tinyusb (interim copy of hathach/tinyusb#4582): host:
@@ -484,7 +484,7 @@ index b0282fb..d355344 100644
 2.55.0.windows.2
 
 
-From f908a25456a43c0281616902d51cc0faa972af90 Mon Sep 17 00:00:00 2001
+From bd5d56ca9194c668f610e93c69f32e7d235ecd30 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:22:37 +0000
 Subject: [PATCH 5/6] pio_usb: add hcd_deinit(), so tuh_deinit() and tuh_init()
@@ -635,7 +635,7 @@ index 8a7722f..055b1c5 100644
 2.55.0.windows.2
 
 
-From 2fe439c993042dd1649596dcb79a7850683d1a56 Mon Sep 17 00:00:00 2001
+From 54c7f4eb472e4f71999215468ddf7c93191aae9f Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 14:56:07 +0000
 Subject: [PATCH 6/6] TEST ONLY: MSC host fail-complete (TinyUSB master
