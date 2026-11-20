@@ -1,7 +1,7 @@
 From 967f9cf73860e4f264f43f8a178aceb9b3ff4b6d Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:21:33 +0000
-Subject: [PATCH 1/5] USBH MSC block device: report a failed command to SdFat
+Subject: [PATCH 1/6] USBH MSC block device: report a failed command to SdFat
 
 _io_complete_cb() did not check the CSW status ("TODO skip csw status"), so
 wait_for_io() returned true for a READ or WRITE that the device reported as
@@ -62,7 +62,7 @@ index d731495..cd82c48 100644
 From e15b84c072f51c84138c0f19757a7721cba66c2e Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:21:52 +0000
-Subject: [PATCH 2/5] USBH: add USBHost.end() to stop the host stack
+Subject: [PATCH 2/6] USBH: add USBHost.end() to stop the host stack
 
 end() calls tuh_deinit() for the port given to begin(). Every device is
 removed first, with the usual unmount callbacks. begin() restarts the stack,
@@ -142,7 +142,7 @@ index 8daa8a7..99d2204 100644
 From ef47e36f7fd5c044728ca6b57cd688af4cab7f05 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:22:21 +0000
-Subject: [PATCH 3/5] examples: DualRole msc_file_explorer_sleep, a USB host
+Subject: [PATCH 3/6] examples: DualRole msc_file_explorer_sleep, a USB host
  that sleeps
 
 RP2040 with arduino-pico's LowPower library: core0 sleeps for 10 s at a time,
@@ -443,7 +443,7 @@ index 0000000..29c1a6a
 From 553397513cd5b76a6e25e5455e3fc40e37da73bb Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 22:49:37 +0000
-Subject: [PATCH 4/5] tinyusb (interim copy of hathach/tinyusb#4582): host:
+Subject: [PATCH 4/6] tinyusb (interim copy of hathach/tinyusb#4582): host:
  re-enumerate a device that STALLs SET_CONFIGURATION
 
 Vendored copy of hathach/tinyusb#4582, so this branch builds and runs before the
@@ -487,7 +487,7 @@ index b0282fb..d355344 100644
 From f908a25456a43c0281616902d51cc0faa972af90 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:22:37 +0000
-Subject: [PATCH 5/5] pio_usb: add hcd_deinit(), so tuh_deinit() and tuh_init()
+Subject: [PATCH 5/6] pio_usb: add hcd_deinit(), so tuh_deinit() and tuh_init()
  work
 
 tuh_deinit() failed its TU_ASSERT(hcd_deinit()) with the Pico-PIO-USB host,
@@ -631,6 +631,96 @@ index 8a7722f..055b1c5 100644
    if ( ints & PIO_USB_INTS_ENDPOINT_COMPLETE_BITS ) {
      handle_endpoint_irq(rport, XFER_RESULT_SUCCESS, &rport->ep_complete);
    }
+-- 
+2.55.0.windows.2
+
+
+From 2fe439c993042dd1649596dcb79a7850683d1a56 Mon Sep 17 00:00:00 2001
+From: tyeth <tyethgundry@googlemail.com>
+Date: Fri, 20 Nov 2026 14:56:07 +0000
+Subject: [PATCH 6/6] TEST ONLY: MSC host fail-complete (TinyUSB master
+ behaviour) for the sleep example
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/class/msc/msc_host.c | 39 ++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 34 insertions(+), 5 deletions(-)
+
+diff --git a/src/class/msc/msc_host.c b/src/class/msc/msc_host.c
+index 78ecadc..d195926 100644
+--- a/src/class/msc/msc_host.c
++++ b/src/class/msc/msc_host.c
+@@ -332,6 +332,25 @@ void msch_close(uint8_t dev_addr) {
+   tu_memclr(p_msc, sizeof(msch_interface_t));
+ }
+ 
++// Complete the pending command with a failed CSW so the caller's complete_cb always runs, instead of leaving the
++// command pending forever (e.g. a stale device address after a disconnect the root port never saw)
++static void msch_complete_failed(uint8_t dev_addr, msch_interface_t* p_msc, msc_cbw_t const* cbw, msc_csw_t* csw) {
++  csw->signature    = MSC_CSW_SIGNATURE;
++  csw->tag          = cbw->tag;
++  csw->data_residue = cbw->total_bytes;
++  csw->status       = MSC_CSW_STATUS_FAILED;
++  p_msc->stage      = MSC_STAGE_IDLE;
++  if (p_msc->complete_cb != NULL) {
++    tuh_msc_complete_data_t const cb_data = {
++        .cbw = cbw,
++        .csw = csw,
++        .scsi_data = p_msc->buffer,
++        .user_arg = p_msc->complete_arg
++    };
++    (void) p_msc->complete_cb(dev_addr, &cb_data);
++  }
++}
++
+ bool msch_xfer_cb(uint8_t dev_addr, uint8_t ep_addr, xfer_result_t event, uint32_t xferred_bytes) {
+   msch_interface_t* p_msc = get_itf(dev_addr);
+   msch_epbuf_t* epbuf = get_epbuf(dev_addr);
+@@ -341,29 +360,39 @@ bool msch_xfer_cb(uint8_t dev_addr, uint8_t ep_addr, xfer_result_t event, uint32
+   switch (p_msc->stage) {
+     case MSC_STAGE_CMD:
+       // Must be Command Block
+-      TU_ASSERT(ep_addr == p_msc->ep_out && event == XFER_RESULT_SUCCESS && xferred_bytes == sizeof(msc_cbw_t));
++      if (!(ep_addr == p_msc->ep_out && event == XFER_RESULT_SUCCESS && xferred_bytes == sizeof(msc_cbw_t))) {
++        msch_complete_failed(dev_addr, p_msc, cbw, csw);
++        return true;
++      }
+       if (cbw->total_bytes && p_msc->buffer) {
+         // Data stage if any
+         p_msc->stage = MSC_STAGE_DATA;
+         p_msc->data_xferred = 0;
+-        TU_ASSERT(data_stage_xfer(dev_addr, p_msc, cbw));
++        if (!data_stage_xfer(dev_addr, p_msc, cbw)) { msch_complete_failed(dev_addr, p_msc, cbw, csw); return true; }
+       } else {
+-        TU_ASSERT(status_stage_xfer(dev_addr, p_msc, csw));
++        if (!status_stage_xfer(dev_addr, p_msc, csw)) { msch_complete_failed(dev_addr, p_msc, cbw, csw); return true; }
+       }
+       break;
+ 
+     case MSC_STAGE_DATA:
++      if (event == XFER_RESULT_FAILED) {
++        msch_complete_failed(dev_addr, p_msc, cbw, csw);
++        return true;
++      }
+       p_msc->data_xferred += xferred_bytes;
+       if (event == XFER_RESULT_SUCCESS && xferred_bytes == MSCH_DATA_XFER_MAX &&
+           p_msc->data_xferred < cbw->total_bytes) {
+-        TU_ASSERT(data_stage_xfer(dev_addr, p_msc, cbw));
++        if (!data_stage_xfer(dev_addr, p_msc, cbw)) { msch_complete_failed(dev_addr, p_msc, cbw, csw); return true; }
+       } else {
+-        TU_ASSERT(status_stage_xfer(dev_addr, p_msc, csw));
++        if (!status_stage_xfer(dev_addr, p_msc, csw)) { msch_complete_failed(dev_addr, p_msc, cbw, csw); return true; }
+       }
+       break;
+ 
+     case MSC_STAGE_STATUS:
+       // SCSI op is complete
++      if (event != XFER_RESULT_SUCCESS) {
++        csw->status = MSC_CSW_STATUS_FAILED;
++      }
+       p_msc->stage = MSC_STAGE_IDLE;
+       if (p_msc->complete_cb != NULL) {
+         tuh_msc_complete_data_t const cb_data = {
 -- 
 2.55.0.windows.2
 
