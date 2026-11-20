@@ -9,6 +9,8 @@
 #   h = g + tests/tusb380/patches/fix_enum_backoff.py (enumeration retries wait CFG_TUH_ENUM_RETRY_DELAY_MS = 1 s)
 #   p1/p2/p3 = one upstream PR branch each (pr/stdio-flush-library-api, pr/lowpower-weak-tud-stubs, pr/adafruit-tinyusb-3.8.0) with its own submodule pointer
 #   w = d + Adafruit_TinyUSB_Arduino master 62e5e1f with tests/tusb380/patches/adafruit-host-sleep-recheck.mbox (USBHost.recheck())
+#   x = d + Adafruit_TinyUSB_Arduino master 62e5e1f with tests/tusb380/patches/adafruit-host-sleep-deinit.mbox (USBHost.end()/begin(),
+#       interim hcd_deinit() for Pico-PIO-USB and the merged SET_CONFIGURATION STALL retry)
 name: TinyUSB 3.8.0 link matrix
 
 on:
@@ -55,19 +57,22 @@ jobs:
           SHA=$(git rev-parse FETCH_HEAD:libraries/Adafruit_TinyUSB_Arduino)
           echo "core-fix branch $(git rev-parse --short FETCH_HEAD) pins Adafruit_TinyUSB_Arduino $SHA"
         fi
-        if [ "${{ matrix.core }}" = w ]; then SHA=62e5e1ff794827d6d22e58f41a8914b22effaa46; fi # Adafruit master the series is on
+        if [ "${{ matrix.core }}" = w ] || [ "${{ matrix.core }}" = x ]; then SHA=62e5e1ff794827d6d22e58f41a8914b22effaa46; fi # Adafruit master the series is on
         cd libraries/Adafruit_TinyUSB_Arduino
         git fetch origin $SHA
         git checkout --detach $SHA
         if [ "${{ matrix.core }}" = w ]; then
           git -c user.name=ci -c user.email=ci@example.invalid am "$GITHUB_WORKSPACE/tests/tusb380/patches/adafruit-host-sleep-recheck.mbox"
         fi
+        if [ "${{ matrix.core }}" = x ]; then
+          git -c user.name=ci -c user.email=ci@example.invalid am "$GITHUB_WORKSPACE/tests/tusb380/patches/adafruit-host-sleep-deinit.mbox"
+        fi
         git log -6 --oneline
         grep version= library.properties
     - name: Core variant ${{ matrix.core }}
       run: |
         case "${{ matrix.core }}" in
-          w) git fetch origin tinyusb-380-core-fixes
+          w|x) git fetch origin tinyusb-380-core-fixes
              git checkout FETCH_HEAD -- cores libraries/LowPower ;;
           p1|p2|p3)
              # one arduino-pico PR branch exactly as pushed: upstream master + its single commit
@@ -185,6 +190,10 @@ jobs:
             build feather-tinyusb-FeatherReenumAB "$B:usbstack=tinyusb,freq=120" $S/FeatherReenumAB "${DBG/FeatherMscFixDbg/FeatherReenumAB}"
             build feather-tinyusb-FeatherReenumAB-nodebug "$B:usbstack=tinyusb,freq=120" $S/FeatherReenumAB
             build feather-tinyusb-FeatherMscWake "$B:usbstack=tinyusb,freq=120" $S/FeatherMscWake "${DBG/FeatherMscFixDbg/FeatherMscWake}"
+            if [ "$CORE" = x ]; then
+              build feather-tinyusb-FeatherMscWake3 "$B:usbstack=tinyusb,freq=120" $S/FeatherMscWake3 "${DBG/FeatherMscFixDbg/FeatherMscWake3}"
+              build feather-tinyusb-msc_file_explorer_sleep "$B:usbstack=tinyusb,freq=120" $L/DualRole/MassStorage/msc_file_explorer_sleep
+            fi
             if [ "$CORE" = w ]; then
               build feather-tinyusb-FeatherMscWake2 "$B:usbstack=tinyusb,freq=120" $S/FeatherMscWake2 "${DBG/FeatherMscFixDbg/FeatherMscWake2}"
               build feather-tinyusb-msc_file_explorer_sleep "$B:usbstack=tinyusb,freq=120" $L/DualRole/MassStorage/msc_file_explorer_sleep
