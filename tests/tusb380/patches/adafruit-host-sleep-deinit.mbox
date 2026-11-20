@@ -1,4 +1,4 @@
-From 2e5e3c05060a5c07f7ddaf17c1423910cd84f6e1 Mon Sep 17 00:00:00 2001
+From e3de003954dab8364ae95dc1e6e76a90ddfd37f7 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:21:33 +0000
 Subject: [PATCH 1/6] USBH MSC block device: report a failed command to SdFat
@@ -9,12 +9,12 @@ failed. It now returns false unless the CSW status is PASSED.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- src/arduino/msc/Adafruit_USBH_MSC.cpp | 13 ++++++++++---
+ src/arduino/msc/Adafruit_USBH_MSC.cpp | 17 ++++++++++++++---
  src/arduino/msc/Adafruit_USBH_MSC.h   |  1 +
- 2 files changed, 11 insertions(+), 3 deletions(-)
+ 2 files changed, 15 insertions(+), 3 deletions(-)
 
 diff --git a/src/arduino/msc/Adafruit_USBH_MSC.cpp b/src/arduino/msc/Adafruit_USBH_MSC.cpp
-index e004274..5031cdf 100644
+index e004274..e16b333 100644
 --- a/src/arduino/msc/Adafruit_USBH_MSC.cpp
 +++ b/src/arduino/msc/Adafruit_USBH_MSC.cpp
 @@ -39,6 +39,7 @@
@@ -25,16 +25,18 @@ index e004274..5031cdf 100644
    _wr_cb = NULL;
  }
  
-@@ -77,7 +78,7 @@ bool Adafruit_USBH_MSC_BlockDevice::wait_for_io(void) {
+@@ -77,7 +78,9 @@ bool Adafruit_USBH_MSC_BlockDevice::wait_for_io(void) {
      }
    }
  
 -  return true;
++  // read _io_ok only after _busy was seen cleared (see _io_complete_cb())
++  __sync_synchronize();
 +  return _io_ok;
  }
  
  bool Adafruit_USBH_MSC_BlockDevice::_io_complete_cb(
-@@ -88,8 +89,9 @@ bool Adafruit_USBH_MSC_BlockDevice::_io_complete_cb(
+@@ -88,8 +91,9 @@ bool Adafruit_USBH_MSC_BlockDevice::_io_complete_cb(
      return false;
    }
  
@@ -46,13 +48,15 @@ index e004274..5031cdf 100644
  
    switch (cb_data->cbw->command[0]) {
    case SCSI_CMD_WRITE_10:
-@@ -99,6 +101,11 @@ bool Adafruit_USBH_MSC_BlockDevice::_io_complete_cb(
+@@ -99,6 +103,13 @@ bool Adafruit_USBH_MSC_BlockDevice::_io_complete_cb(
      break;
    }
  
 +  // Set last: I/O that _wr_cb runs on this device sets _io_ok for itself, so
 +  // this command's result must not be set before it.
 +  _io_ok = io_ok;
++  // the waiter may be on the other core: _io_ok must be visible before _busy
++  __sync_synchronize();
 +  _busy = false;
 +
    return true;
@@ -74,7 +78,7 @@ index d731495..cd82c48 100644
 2.55.0.windows.2
 
 
-From 71f96d462f6e475dacf89fbf0e8d6d06a0f81590 Mon Sep 17 00:00:00 2001
+From 5dbcf982881a327e109488d5c7e50d8db08d91b3 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:21:52 +0000
 Subject: [PATCH 2/6] USBH: add USBHost.end() to stop the host stack
@@ -99,12 +103,12 @@ the task only once, so it can be called again after end().
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- src/arduino/Adafruit_USBH_Host.cpp | 64 +++++++++++++++++++++++++++---
+ src/arduino/Adafruit_USBH_Host.cpp | 71 +++++++++++++++++++++++++++---
  src/arduino/Adafruit_USBH_Host.h   | 10 +++++
- 2 files changed, 69 insertions(+), 5 deletions(-)
+ 2 files changed, 76 insertions(+), 5 deletions(-)
 
 diff --git a/src/arduino/Adafruit_USBH_Host.cpp b/src/arduino/Adafruit_USBH_Host.cpp
-index cdba773..b2e42fb 100644
+index cdba773..b568092 100644
 --- a/src/arduino/Adafruit_USBH_Host.cpp
 +++ b/src/arduino/Adafruit_USBH_Host.cpp
 @@ -60,6 +60,10 @@ static void max3421_isr(void);
@@ -158,7 +162,7 @@ index cdba773..b2e42fb 100644
    attachInterrupt(_intr, max3421_isr, FALLING);
  #endif
  
-@@ -148,6 +171,33 @@ void Adafruit_USBH_Host::task(uint32_t timeout_ms, bool in_isr) {
+@@ -148,6 +171,40 @@ void Adafruit_USBH_Host::task(uint32_t timeout_ms, bool in_isr) {
    tuh_task_ext(timeout_ms, in_isr);
  }
  
@@ -167,10 +171,17 @@ index cdba773..b2e42fb 100644
 +  // No interrupt handler may run once tuh_deinit() frees the driver's state
 +  detachInterrupt(_intr);
 +#ifdef ARDUINO_ARCH_ESP32
-+  // wait for a handler that is running; a pending notification is then ignored
-+  xSemaphoreTake(max3421_intr_lock, portMAX_DELAY);
-+  max3421_intr_enabled = false;
-+  xSemaphoreGive(max3421_intr_lock);
++  // Wait for a handler that is running; a pending notification is then
++  // ignored. The handler can wait for space in the host event queue, which
++  // only task() empties: keep emptying it meanwhile (end() runs where task()
++  // runs).
++  if (max3421_intr_lock != NULL) {
++    while (xSemaphoreTake(max3421_intr_lock, pdMS_TO_TICKS(1)) != pdTRUE) {
++      tuh_task_ext(0, false);
++    }
++    max3421_intr_enabled = false;
++    xSemaphoreGive(max3421_intr_lock);
++  }
 +#endif
 +#endif
 +
@@ -192,7 +203,7 @@ index cdba773..b2e42fb 100644
  // Invoked when received report from device via interrupt endpoint
  TU_ATTR_WEAK void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
                                               uint8_t const *report,
-@@ -181,7 +231,11 @@ static void max3421_intr_task(void *param) {
+@@ -181,7 +238,11 @@ static void max3421_intr_task(void *param) {
  
    while (1) {
      xSemaphoreTake(max3421_intr_sem, portMAX_DELAY);
@@ -230,7 +241,7 @@ index 8daa8a7..99d2204 100644
 2.55.0.windows.2
 
 
-From 5b50d5c6140826b61beda79f6d2ba8ab56c57fa5 Mon Sep 17 00:00:00 2001
+From be7c3b6fc3282f37344aafaf17ee7da1eb404026 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:22:21 +0000
 Subject: [PATCH 3/6] examples: DualRole msc_file_explorer_sleep, a USB host
@@ -247,9 +258,9 @@ access is on core1. CI builds it for the Feather RP2040 USB Host only
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  .../.feather_rp2040_tinyusb.test.only         |   0
- .../msc_file_explorer_sleep.ino               | 169 ++++++++++++++++++
+ .../msc_file_explorer_sleep.ino               | 172 ++++++++++++++++++
  .../msc_file_explorer_sleep/usbh_helper.h     |  99 ++++++++++
- 3 files changed, 268 insertions(+)
+ 3 files changed, 271 insertions(+)
  create mode 100644 examples/DualRole/MassStorage/msc_file_explorer_sleep/.feather_rp2040_tinyusb.test.only
  create mode 100644 examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino
  create mode 100644 examples/DualRole/MassStorage/msc_file_explorer_sleep/usbh_helper.h
@@ -259,10 +270,10 @@ new file mode 100644
 index 0000000..e69de29
 diff --git a/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino b/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino
 new file mode 100644
-index 0000000..4739d47
+index 0000000..7ead433
 --- /dev/null
 +++ b/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,172 @@
 +/*********************************************************************
 + Adafruit invests time and resources providing this open source code,
 + please support Adafruit and open-source hardware by purchasing
@@ -294,6 +305,9 @@ index 0000000..4739d47
 + * - 2 consecutive GPIOs: D+ is defined by PIN_USB_HOST_DP, D- = D+ +1
 + * - Provide VBus (5v) and GND for peripheral
 + * - CPU Speed must be either 120 or 240 Mhz. Selected via "Menu -> CPU Speed"
++ * - USBHost.end() needs hcd_deinit() for Pico-PIO-USB in the TinyUSB of this
++ *   library (hathach/tinyusb#4586): until this library has it, the example
++ *   prints that the host cannot be stopped, and does not sleep.
 + */
 +
 +// SdFat is required for using Adafruit_USBH_MSC_SdFatDevice
@@ -541,7 +555,7 @@ index 0000000..29c1a6a
 2.55.0.windows.2
 
 
-From 078349b73c18f75c09d2fd223f1183034bb0ee5e Mon Sep 17 00:00:00 2001
+From 9ebd2152ee8db92534df313256fab9ccd79337df Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 22:49:37 +0000
 Subject: [PATCH 4/6] tinyusb (interim copy of hathach/tinyusb#4582): host:
@@ -585,7 +599,7 @@ index b0282fb..d355344 100644
 2.55.0.windows.2
 
 
-From e8745b0b208f356afb41327769d0fec201445e01 Mon Sep 17 00:00:00 2001
+From 3ed8dabe8b742843d11b7cbd23c61408671fb99b Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:22:37 +0000
 Subject: [PATCH 5/6] pio_usb: add hcd_deinit(), so tuh_deinit() and tuh_init()
@@ -736,7 +750,7 @@ index 8a7722f..055b1c5 100644
 2.55.0.windows.2
 
 
-From f16a420ce06ca8191e9c3178f5e0e95df197f6e7 Mon Sep 17 00:00:00 2001
+From 35b605351af942171b8ad40e62f224f82e8e2f99 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 14:56:07 +0000
 Subject: [PATCH 6/6] TEST ONLY: MSC host fail-complete (TinyUSB master
