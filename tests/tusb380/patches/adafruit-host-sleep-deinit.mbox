@@ -484,7 +484,7 @@ index b0282fb..d355344 100644
 2.55.0.windows.2
 
 
-From 51b81f3c4d46ad454559dbf139fa8f5a56255dfb Mon Sep 17 00:00:00 2001
+From f908a25456a43c0281616902d51cc0faa972af90 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:22:37 +0000
 Subject: [PATCH 5/5] pio_usb: add hcd_deinit(), so tuh_deinit() and tuh_init()
@@ -498,38 +498,62 @@ could not restart it.
 Pico-PIO-USB cannot be initialized twice: pio_usb_host_init() claims PIO
 state machines and program space and starts the SOF timer. Its
 pio_usb_host_stop()/pio_usb_host_restart() cannot be used: they wait for
-flags that only the host stack removed in Pico-PIO-USB 0.6 cleared, so they
-never return. So:
-- hcd_deinit() parks the root port: no SOF and no transfers (suspended),
-  endpoints and pending interrupt status cleared, and the IRQ handler drops
-  events until the next hcd_init().
+flags that only the host stack removed from Pico-PIO-USB in 2024 cleared, so
+they never return. So:
+- hcd_deinit() parks every root port: no SOF and no transfers (suspended),
+  a bus reset that is under way is ended (its hcd_port_reset_end() will not
+  come, and the lines would stay in SE0), endpoints and pending interrupt
+  status are cleared, and the IRQ handler drops events until the next
+  hcd_init().
 - hcd_init() calls pio_usb_host_init() only the first time. After
-  hcd_deinit() it marks the port as disconnected, so the next frame reports
-  the device that is attached now as a new connection, and usbh enumerates it.
+  hcd_deinit() it marks the ports as disconnected, so the next frame reports
+  the device that is attached now as a new connection, and usbh enumerates
+  it. Events are enabled before pio_usb_host_init(), so a connect in the
+  first frame is not dropped.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- .../raspberrypi/pio_usb/hcd_pio_usb.c         | 63 ++++++++++++++++++-
- 1 file changed, 61 insertions(+), 2 deletions(-)
+ .../raspberrypi/pio_usb/hcd_pio_usb.c         | 83 ++++++++++++++++++-
+ 1 file changed, 81 insertions(+), 2 deletions(-)
 
 diff --git a/src/portable/raspberrypi/pio_usb/hcd_pio_usb.c b/src/portable/raspberrypi/pio_usb/hcd_pio_usb.c
-index 8a7722f..c0aaed7 100644
+index 8a7722f..055b1c5 100644
 --- a/src/portable/raspberrypi/pio_usb/hcd_pio_usb.c
 +++ b/src/portable/raspberrypi/pio_usb/hcd_pio_usb.c
-@@ -37,6 +37,31 @@
+@@ -10,6 +10,7 @@
+ #if CFG_TUH_ENABLED && (CFG_TUSB_MCU == OPT_MCU_RP2040) && CFG_TUH_RPI_PIO_USB
+ 
+ #include "pico.h"
++#include "hardware/gpio.h"
+ 
+ #include "pio_usb.h"
+ 
+@@ -37,6 +38,43 @@
  
  static pio_usb_configuration_t pio_host_cfg = PIO_USB_DEFAULT_CONFIG;
  
 +// Pico-PIO-USB cannot be initialized a second time: pio_usb_host_init() claims the PIO state machines and program
 +// space, and starts the SOF timer. pio_usb_host_stop() and pio_usb_host_restart() cannot be used either: they wait for
 +// a flag that only the old Pico-PIO-USB host stack cleared. So hcd_deinit() leaves the PIO and the SOF timer running
-+// and only parks the root port. The next hcd_init() makes the port detect the attached device again, as a new device.
++// and only parks the root ports. The next hcd_init() makes them detect the attached devices again, as new devices.
++// Like the other HCD functions, hcd_deinit() must run on the core that called the first hcd_init(): the SOF timer
++// runs there, so a frame never runs in the middle of it.
 +static bool pio_inited = false;           // pio_usb_host_init() is done
 +static volatile bool hcd_running = false; // between hcd_init() and hcd_deinit()
 +
-+// Forget the port's endpoints and its pending interrupt status
-+static void root_port_clear(uint8_t pio_rhport) {
++// Park a root port: no SOF and no transfers. A frame then skips the port, and does not check it for a detach either.
++// Its endpoints are freed and its pending interrupt status is cleared.
++static void root_port_park(uint8_t pio_rhport) {
 +  root_port_t *root = PIO_USB_ROOT_PORT(pio_rhport);
++
++  root->suspended = true;
++
++  // End a bus reset that is under way: its hcd_port_reset_end() will not come, and the lines would stay in SE0.
++  // As pio_usb_host_port_reset_end(), without un-suspending the port.
++  gpio_set_oeover(root->pin_dp, GPIO_OVERRIDE_NORMAL);
++  gpio_set_oeover(root->pin_dm, GPIO_OVERRIDE_NORMAL);
++  gpio_set_outover(root->pin_dp, GPIO_OVERRIDE_NORMAL);
++  gpio_set_outover(root->pin_dm, GPIO_OVERRIDE_NORMAL);
 +
 +  for (uint8_t ep_idx = 0; ep_idx < PIO_USB_EP_POOL_CNT; ep_idx++) {
 +    endpoint_t *ep = PIO_USB_ENDPOINT(ep_idx);
@@ -548,43 +572,50 @@ index 8a7722f..c0aaed7 100644
  //--------------------------------------------------------------------+
  // HCD API
  //--------------------------------------------------------------------+
-@@ -51,8 +76,33 @@ bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
+@@ -51,8 +89,40 @@ bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
    (void) rhport;
    (void) rh_init;
  
 -  // To run USB SOF interrupt in core1, call this init in core1
 -  pio_usb_host_init(&pio_host_cfg);
++  // before the first frame can run: its connect event must reach usbh
++  hcd_running = true;
++
 +  if (!pio_inited) {
 +    // To run USB SOF interrupt in core1, call this init in core1
 +    pio_usb_host_init(&pio_host_cfg);
-+    pio_inited  = true;
-+    hcd_running = true;
++    pio_inited = true;
 +  } else {
-+    // After hcd_deinit(): the PIO and the SOF timer still run. Mark the port as disconnected, so the next frame
++    // After hcd_deinit(): the PIO and the SOF timer still run. Mark the ports as disconnected, so the next frame
 +    // reports the device that is attached now as a new connection. The bus reset of its enumeration ends the suspend
 +    // that hcd_deinit() started.
-+    hcd_running = true;
-+    PIO_USB_ROOT_PORT(RHPORT_PIO(rhport))->connected = false;
++    for (uint8_t root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
++      root_port_t *root = PIO_USB_ROOT_PORT(root_idx);
++      if (root->initialized) {
++        root->connected = false;
++      }
++    }
 +  }
 +
 +  return true;
 +}
 +
 +bool hcd_deinit(uint8_t rhport) {
-+  uint8_t const pio_rhport = RHPORT_PIO(rhport);
-+  root_port_t *root = PIO_USB_ROOT_PORT(pio_rhport);
++  (void) rhport;
 +
 +  // Events from now on are dropped: the host stack is stopping
 +  hcd_running = false;
 +
-+  // No SOF and no transfers on this port: a frame that runs now skips it, and does not check for a detach either.
-+  // Without SOF, the device enters USB suspend.
-+  root->suspended = true;
-+  root_port_clear(pio_rhport);
++  // All ports: the IRQ handler drops the events of every port. Without SOF, the devices enter USB suspend.
++  for (uint8_t root_idx = 0; root_idx < PIO_USB_ROOT_PORT_CNT; root_idx++) {
++    if (PIO_USB_ROOT_PORT(root_idx)->initialized) {
++      root_port_park(root_idx);
++    }
++  }
  
    return true;
  }
-@@ -180,6 +230,15 @@ void __no_inline_not_in_flash_func(pio_usb_host_irq_handler)(uint8_t root_id) {
+@@ -180,6 +250,15 @@ void __no_inline_not_in_flash_func(pio_usb_host_irq_handler)(uint8_t root_id) {
    root_port_t *rport = PIO_USB_ROOT_PORT(root_id);
    uint32_t const ints = rport->ints;
  
