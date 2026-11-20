@@ -192,6 +192,7 @@ jobs:
             build feather-tinyusb-FeatherMscWake "$B:usbstack=tinyusb,freq=120" $S/FeatherMscWake "${DBG/FeatherMscFixDbg/FeatherMscWake}"
             if [ "$CORE" = x ]; then
               build feather-tinyusb-FeatherMscWake3 "$B:usbstack=tinyusb,freq=120" $S/FeatherMscWake3 "${DBG/FeatherMscFixDbg/FeatherMscWake3}"
+              build feather-tinyusb-ExampleSleepDbg "$B:usbstack=tinyusb,freq=120" $S/ExampleSleepDbg "${DBG/FeatherMscFixDbg/ExampleSleepDbg}"
               build feather-tinyusb-msc_file_explorer_sleep "$B:usbstack=tinyusb,freq=120" $L/DualRole/MassStorage/msc_file_explorer_sleep
             fi
             if [ "$CORE" = w ]; then
