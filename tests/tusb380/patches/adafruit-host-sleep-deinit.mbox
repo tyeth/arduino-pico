@@ -1,4 +1,4 @@
-From 967f9cf73860e4f264f43f8a178aceb9b3ff4b6d Mon Sep 17 00:00:00 2001
+From 2e5e3c05060a5c07f7ddaf17c1423910cd84f6e1 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:21:33 +0000
 Subject: [PATCH 1/6] USBH MSC block device: report a failed command to SdFat
@@ -9,12 +9,12 @@ failed. It now returns false unless the CSW status is PASSED.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- src/arduino/msc/Adafruit_USBH_MSC.cpp | 5 +++--
- src/arduino/msc/Adafruit_USBH_MSC.h   | 1 +
- 2 files changed, 4 insertions(+), 2 deletions(-)
+ src/arduino/msc/Adafruit_USBH_MSC.cpp | 13 ++++++++++---
+ src/arduino/msc/Adafruit_USBH_MSC.h   |  1 +
+ 2 files changed, 11 insertions(+), 3 deletions(-)
 
 diff --git a/src/arduino/msc/Adafruit_USBH_MSC.cpp b/src/arduino/msc/Adafruit_USBH_MSC.cpp
-index e004274..0688c4c 100644
+index e004274..5031cdf 100644
 --- a/src/arduino/msc/Adafruit_USBH_MSC.cpp
 +++ b/src/arduino/msc/Adafruit_USBH_MSC.cpp
 @@ -39,6 +39,7 @@
@@ -34,15 +34,30 @@ index e004274..0688c4c 100644
  }
  
  bool Adafruit_USBH_MSC_BlockDevice::_io_complete_cb(
-@@ -88,7 +89,7 @@ bool Adafruit_USBH_MSC_BlockDevice::_io_complete_cb(
+@@ -88,8 +89,9 @@ bool Adafruit_USBH_MSC_BlockDevice::_io_complete_cb(
      return false;
    }
  
 -  // TODO skip csw status: assuming io is successful
-+  _io_ok = (cb_data->csw->status == MSC_CSW_STATUS_PASSED);
-   _busy = false;
+-  _busy = false;
++  // passed, and all the data was transferred (sectors are whole blocks)
++  bool const io_ok = (cb_data->csw->status == MSC_CSW_STATUS_PASSED) &&
++                     (cb_data->csw->data_residue == 0);
  
    switch (cb_data->cbw->command[0]) {
+   case SCSI_CMD_WRITE_10:
+@@ -99,6 +101,11 @@ bool Adafruit_USBH_MSC_BlockDevice::_io_complete_cb(
+     break;
+   }
+ 
++  // Set last: I/O that _wr_cb runs on this device sets _io_ok for itself, so
++  // this command's result must not be set before it.
++  _io_ok = io_ok;
++  _busy = false;
++
+   return true;
+ }
+ 
 diff --git a/src/arduino/msc/Adafruit_USBH_MSC.h b/src/arduino/msc/Adafruit_USBH_MSC.h
 index d731495..cd82c48 100644
 --- a/src/arduino/msc/Adafruit_USBH_MSC.h
@@ -59,7 +74,7 @@ index d731495..cd82c48 100644
 2.55.0.windows.2
 
 
-From b800d4a0e8aece93b174147dd9eb9b34164774fb Mon Sep 17 00:00:00 2001
+From 71f96d462f6e475dacf89fbf0e8d6d06a0f81590 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:21:52 +0000
 Subject: [PATCH 2/6] USBH: add USBHost.end() to stop the host stack
@@ -72,22 +87,38 @@ This is for a sleep that stops the host, e.g. arduino-pico LowPower sleepFor()
 on RP2040, which idles the core that runs the Pico-PIO-USB host: call end()
 before the sleep and begin() after it. TinyUSB's maintainers recommend
 tuh_deinit()/tuh_init() for this while the host stack has no suspend/resume.
-The Pico-PIO-USB host controller driver needs hcd_deinit() for it.
+The Pico-PIO-USB host controller driver needs hcd_deinit() for it
+(hathach/tinyusb#4586).
 
-begin() on ESP32 with MAX3421 now creates its interrupt task only once, so
-begin() can be called again after end().
+MAX3421: end() detaches the interrupt first, so no handler runs once
+tuh_deinit() frees the driver's state. On ESP32 the interrupt task now runs
+the handler under a mutex and only while enabled: end() takes the mutex to
+wait for a handler that is running, and a pending notification is then
+ignored. If tuh_deinit() fails, the interrupt is given back. begin() creates
+the task only once, so it can be called again after end().
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- src/arduino/Adafruit_USBH_Host.cpp | 13 +++++++++----
- src/arduino/Adafruit_USBH_Host.h   | 10 ++++++++++
- 2 files changed, 19 insertions(+), 4 deletions(-)
+ src/arduino/Adafruit_USBH_Host.cpp | 64 +++++++++++++++++++++++++++---
+ src/arduino/Adafruit_USBH_Host.h   | 10 +++++
+ 2 files changed, 69 insertions(+), 5 deletions(-)
 
 diff --git a/src/arduino/Adafruit_USBH_Host.cpp b/src/arduino/Adafruit_USBH_Host.cpp
-index cdba773..6b1a88f 100644
+index cdba773..b2e42fb 100644
 --- a/src/arduino/Adafruit_USBH_Host.cpp
 +++ b/src/arduino/Adafruit_USBH_Host.cpp
-@@ -123,10 +123,13 @@ bool Adafruit_USBH_Host::begin(uint8_t rhport) {
+@@ -60,6 +60,10 @@ static void max3421_isr(void);
+ 
+ #if defined(ARDUINO_ARCH_ESP32)
+ SemaphoreHandle_t max3421_intr_sem;
++// Held by the interrupt task while it runs the handler. end() takes it to wait
++// for a handler that is running, and clears max3421_intr_enabled under it.
++static SemaphoreHandle_t max3421_intr_lock;
++static volatile bool max3421_intr_enabled;
+ static void max3421_intr_task(void *param);
+ #endif
+ 
+@@ -123,16 +127,35 @@ bool Adafruit_USBH_Host::begin(uint8_t rhport) {
    // ESP32 SPI assign pins when begin() of declaration as standard API
    _spi->begin(_sck, _miso, _mosi, -1);
  
@@ -99,21 +130,81 @@ index cdba773..6b1a88f 100644
 +  // Only once: begin() is called again after end().
 +  if (max3421_intr_sem == NULL) {
 +    max3421_intr_sem = xSemaphoreCreateBinary();
-+    xTaskCreateUniversal(max3421_intr_task, "max3421 intr", 2048, NULL, 5, NULL,
-+                         ARDUINO_RUNNING_CORE);
++    max3421_intr_lock = xSemaphoreCreateMutex();
++    if (max3421_intr_sem == NULL || max3421_intr_lock == NULL ||
++        xTaskCreateUniversal(max3421_intr_task, "max3421 intr", 2048, NULL, 5,
++                             NULL, ARDUINO_RUNNING_CORE) != pdPASS) {
++      // undo, so that a later begin() tries again
++      if (max3421_intr_sem != NULL) {
++        vSemaphoreDelete(max3421_intr_sem);
++        max3421_intr_sem = NULL;
++      }
++      if (max3421_intr_lock != NULL) {
++        vSemaphoreDelete(max3421_intr_lock);
++        max3421_intr_lock = NULL;
++      }
++      return false;
++    }
 +  }
  #else
    _spi->begin();
  #endif
-@@ -148,6 +151,8 @@ void Adafruit_USBH_Host::task(uint32_t timeout_ms, bool in_isr) {
+ 
+   // Interrupt pin
+   pinMode(_intr, INPUT_PULLUP);
++#ifdef ARDUINO_ARCH_ESP32
++  max3421_intr_enabled = true;
++#endif
+   attachInterrupt(_intr, max3421_isr, FALLING);
+ #endif
+ 
+@@ -148,6 +171,33 @@ void Adafruit_USBH_Host::task(uint32_t timeout_ms, bool in_isr) {
    tuh_task_ext(timeout_ms, in_isr);
  }
  
-+bool Adafruit_USBH_Host::end(void) { return tuh_deinit(_rhport); }
++bool Adafruit_USBH_Host::end(void) {
++#if defined(CFG_TUH_MAX3421) && CFG_TUH_MAX3421
++  // No interrupt handler may run once tuh_deinit() frees the driver's state
++  detachInterrupt(_intr);
++#ifdef ARDUINO_ARCH_ESP32
++  // wait for a handler that is running; a pending notification is then ignored
++  xSemaphoreTake(max3421_intr_lock, portMAX_DELAY);
++  max3421_intr_enabled = false;
++  xSemaphoreGive(max3421_intr_lock);
++#endif
++#endif
++
++  bool const ok = tuh_deinit(_rhport);
++
++#if defined(CFG_TUH_MAX3421) && CFG_TUH_MAX3421
++  if (!ok) {
++    // the host is still running: give it its interrupt back
++#ifdef ARDUINO_ARCH_ESP32
++    max3421_intr_enabled = true;
++#endif
++    attachInterrupt(_intr, max3421_isr, FALLING);
++  }
++#endif
++
++  return ok;
++}
 +
  // Invoked when received report from device via interrupt endpoint
  TU_ATTR_WEAK void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance,
                                               uint8_t const *report,
+@@ -181,7 +231,11 @@ static void max3421_intr_task(void *param) {
+ 
+   while (1) {
+     xSemaphoreTake(max3421_intr_sem, portMAX_DELAY);
+-    tuh_int_handler_esp32(1, false);
++    xSemaphoreTake(max3421_intr_lock, portMAX_DELAY);
++    if (max3421_intr_enabled) {
++      tuh_int_handler_esp32(1, false);
++    }
++    xSemaphoreGive(max3421_intr_lock);
+   }
+ }
+ 
 diff --git a/src/arduino/Adafruit_USBH_Host.h b/src/arduino/Adafruit_USBH_Host.h
 index 8daa8a7..99d2204 100644
 --- a/src/arduino/Adafruit_USBH_Host.h
@@ -139,7 +230,7 @@ index 8daa8a7..99d2204 100644
 2.55.0.windows.2
 
 
-From 6c730aca03149de9da97c1e99a9d2b78292b7f8a Mon Sep 17 00:00:00 2001
+From 5b50d5c6140826b61beda79f6d2ba8ab56c57fa5 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:22:21 +0000
 Subject: [PATCH 3/6] examples: DualRole msc_file_explorer_sleep, a USB host
@@ -156,9 +247,9 @@ access is on core1. CI builds it for the Feather RP2040 USB Host only
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  .../.feather_rp2040_tinyusb.test.only         |   0
- .../msc_file_explorer_sleep.ino               | 159 ++++++++++++++++++
- .../msc_file_explorer_sleep/usbh_helper.h     |  99 +++++++++++
- 3 files changed, 258 insertions(+)
+ .../msc_file_explorer_sleep.ino               | 169 ++++++++++++++++++
+ .../msc_file_explorer_sleep/usbh_helper.h     |  99 ++++++++++
+ 3 files changed, 268 insertions(+)
  create mode 100644 examples/DualRole/MassStorage/msc_file_explorer_sleep/.feather_rp2040_tinyusb.test.only
  create mode 100644 examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino
  create mode 100644 examples/DualRole/MassStorage/msc_file_explorer_sleep/usbh_helper.h
@@ -168,10 +259,10 @@ new file mode 100644
 index 0000000..e69de29
 diff --git a/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino b/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino
 new file mode 100644
-index 0000000..07c7d42
+index 0000000..4739d47
 --- /dev/null
 +++ b/examples/DualRole/MassStorage/msc_file_explorer_sleep/msc_file_explorer_sleep.ino
-@@ -0,0 +1,159 @@
+@@ -0,0 +1,169 @@
 +/*********************************************************************
 + Adafruit invests time and resources providing this open source code,
 + please support Adafruit and open-source hardware by purchasing
@@ -226,6 +317,9 @@ index 0000000..07c7d42
 +enum { REQ_NONE, REQ_LIST, REQ_STOP, REQ_START };
 +volatile int core1_request = REQ_NONE;
 +
++// the result of the last USBHost.end(): false if this host cannot be stopped
++volatile bool host_stopped = false;
++
 +static void ask_core1(int request) {
 +  core1_request = request;
 +  while (core1_request != REQ_NONE) {
@@ -248,6 +342,13 @@ index 0000000..07c7d42
 +
 +  // Stop the host stack: the drive is unmounted
 +  ask_core1(REQ_STOP);
++  if (!host_stopped) {
++    // e.g. a TinyUSB without hcd_deinit() for this host controller
++    Serial.println("USBHost.end() failed: this host cannot be stopped, so this example cannot sleep");
++    while (1) {
++      delay(1000);
++    }
++  }
 +
 +  Serial.println("Sleeping 10 s: unplug, swap or replug the drive now if you like");
 +  Serial.flush();
@@ -285,7 +386,7 @@ index 0000000..07c7d42
 +
 +    case REQ_STOP:
 +      // end() unmounts the drive (tuh_msc_umount_cb() below)
-+      USBHost.end();
++      host_stopped = USBHost.end();
 +      host_running = false;
 +      break;
 +
@@ -440,7 +541,7 @@ index 0000000..29c1a6a
 2.55.0.windows.2
 
 
-From ac7dad74bccb358d371bfadaddbc2d462203ed83 Mon Sep 17 00:00:00 2001
+From 078349b73c18f75c09d2fd223f1183034bb0ee5e Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Thu, 19 Nov 2026 22:49:37 +0000
 Subject: [PATCH 4/6] tinyusb (interim copy of hathach/tinyusb#4582): host:
@@ -484,7 +585,7 @@ index b0282fb..d355344 100644
 2.55.0.windows.2
 
 
-From bd5d56ca9194c668f610e93c69f32e7d235ecd30 Mon Sep 17 00:00:00 2001
+From e8745b0b208f356afb41327769d0fec201445e01 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 01:22:37 +0000
 Subject: [PATCH 5/6] pio_usb: add hcd_deinit(), so tuh_deinit() and tuh_init()
@@ -635,7 +736,7 @@ index 8a7722f..055b1c5 100644
 2.55.0.windows.2
 
 
-From 54c7f4eb472e4f71999215468ddf7c93191aae9f Mon Sep 17 00:00:00 2001
+From f16a420ce06ca8191e9c3178f5e0e95df197f6e7 Mon Sep 17 00:00:00 2001
 From: tyeth <tyethgundry@googlemail.com>
 Date: Fri, 20 Nov 2026 14:56:07 +0000
 Subject: [PATCH 6/6] TEST ONLY: MSC host fail-complete (TinyUSB master
